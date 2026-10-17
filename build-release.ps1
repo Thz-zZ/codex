@@ -1,7 +1,7 @@
-param([string]$OutputDirectory)
+param([string]$OutputDirectory,[string]$BuildDirectory)
 $ErrorActionPreference='Stop'
 $relayRoot=$PSScriptRoot
-& (Join-Path $relayRoot 'build-dev.ps1')
+& (Join-Path $relayRoot 'build-dev.ps1') -OutputDirectory $BuildDirectory
 if($LASTEXITCODE -ne 0){throw '应用编译失败。'}
 $relayVersionMatch=[regex]::Match([IO.File]::ReadAllText((Join-Path $relayRoot 'src/AppVersion.cs')),'const string Number="(\d+\.\d+\.\d+)"')
 if(-not $relayVersionMatch.Success){throw '无法读取应用版本号。'}
@@ -9,8 +9,8 @@ $relayVersion=$relayVersionMatch.Groups[1].Value
 if(-not $OutputDirectory){$OutputDirectory=Join-Path $relayRoot ('release/Codex Relay Lite v'+$relayVersion)}
 $relayRelease=[IO.Path]::GetFullPath($OutputDirectory)
 if(Test-Path -LiteralPath $relayRelease){throw ('输出目录已存在，请指定新目录：'+$relayRelease)}
-$relayBuild=Join-Path $relayRoot 'build'
-$relayFiles=@('SessionBackend.exe','Codex Relay Lite.exe','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','Nett.dll')
+$relayBuild=if($BuildDirectory){[IO.Path]::GetFullPath($BuildDirectory)}else{Join-Path $relayRoot 'build'}
+$relayFiles=@('SessionBackend.exe','Codex Relay Lite.exe','Updater.exe','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','Nett.dll')
 foreach($relayFile in $relayFiles){if(-not (Test-Path -LiteralPath (Join-Path $relayBuild $relayFile))){throw ('缺少运行文件：'+$relayFile)}}
 New-Item -ItemType Directory -Path $relayRelease -Force | Out-Null
 foreach($relayFile in $relayFiles){Copy-Item -LiteralPath (Join-Path $relayBuild $relayFile) -Destination $relayRelease}
@@ -30,6 +30,7 @@ Codex Relay Lite v$relayVersion
 支持 Windows x64，使用 .NET Framework 4.8 和 Microsoft Edge WebView2 Runtime。
 中转与加密密钥沿用本机 Codex Relay Lite 数据目录。
 关闭窗口会收起到托盘；完全退出请右键托盘图标选择“退出”。
+“设置 → 软件更新”可检查、下载并重启安装新版，默认在启动时及每 6 小时检查。
 
 “会话管理”位于左侧“设置”下方，详细用法见“会话管理说明.md”。
 导入或永久删除前需要关闭其他 Codex 客户端。
@@ -39,4 +40,17 @@ Codex Relay Lite v$relayVersion
 [IO.File]::WriteAllText((Join-Path $relayRelease '使用说明.txt'),$relayGuide,$relayEncoding)
 $relayManifest=[ordered]@{name='Codex Relay Lite';version=$relayVersion;fileVersion=($relayVersion+'.0');platform='windows-x64';builtAtUtc=[DateTime]::UtcNow.ToString('o')}
 [IO.File]::WriteAllText((Join-Path $relayRelease 'build-info.json'),($relayManifest | ConvertTo-Json),$relayEncoding)
+$relayPackageFiles=@(Get-ChildItem -LiteralPath $relayRelease -Recurse -File | ForEach-Object {$_.FullName.Substring($relayRelease.TrimEnd('\').Length+1).Replace('\','/')} | Sort-Object)+@('package-files.json')
+[IO.File]::WriteAllText((Join-Path $relayRelease 'package-files.json'),(@{files=$relayPackageFiles} | ConvertTo-Json -Depth 5),$relayEncoding)
+$relayAssets=$relayRelease+'-assets'
+if(Test-Path -LiteralPath $relayAssets){throw ('更新发布目录已存在：'+$relayAssets)}
+New-Item -ItemType Directory -Path $relayAssets | Out-Null
+$relayArchiveName='CodexRelayLite-'+$relayVersion+'-windows-x64.zip'
+$relayArchive=Join-Path $relayAssets $relayArchiveName
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[IO.Compression.ZipFile]::CreateFromDirectory($relayRelease,$relayArchive)
+$relayNotesMatch=[regex]::Match([IO.File]::ReadAllText((Join-Path $relayRoot 'CHANGELOG.md')),'(?ms)^## v'+[regex]::Escape($relayVersion)+'[^\r\n]*\r?\n(.*?)(?=^## |\z)')
+$relayUpdate=@{version=$relayVersion;platform='windows-x64';url=('https://github.com/Thz-zZ/codex/releases/download/v'+$relayVersion+'/'+$relayArchiveName);size=(Get-Item -LiteralPath $relayArchive).Length;sha256=(Get-FileHash -LiteralPath $relayArchive -Algorithm SHA256).Hash.ToLowerInvariant();notes=$relayNotesMatch.Groups[1].Value.Trim()}
+[IO.File]::WriteAllText((Join-Path $relayAssets 'update.json'),($relayUpdate | ConvertTo-Json),$relayEncoding)
 Write-Output ('Release ready: '+$relayRelease)
+Write-Output ('Upload both files to GitHub Release v'+$relayVersion+': '+$relayAssets)

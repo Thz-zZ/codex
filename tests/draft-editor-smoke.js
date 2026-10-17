@@ -8,6 +8,13 @@
   check(page==='details'&&Boolean(detailId),'opens selected relay details by default');
   check(!$('backToList')&&!document.querySelector('[data-nav=history]'),'no extra detail navigation or history page');
   check(document.querySelector('.side-bottom [data-nav=settings]'),'settings anchored at sidebar bottom');
+  check(!document.querySelector('.sidebar #pauseAuto,.sidebar #refreshCountdown')&&!$('refreshAll'),'sidebar refresh module removed');
+  check($('pauseAuto').closest('.detail-refresh-controls')&&$('refreshDetail').closest('.detail-refresh-controls'),'automatic and manual refresh controls share the right toolbar');
+  check(!$('refreshCountdown')&&!$('detailCountdown'),'automatic refresh countdowns removed');
+  check($('detailRefreshTime').closest('.detail-toolbar')&&!$('detailBody').contains($('detailRefreshTime')),'refresh time moved above the date and model filters');
+  const referenceTime=Date.parse('2026-10-17T06:00:00Z');
+  for(const [seconds,label] of [[0,'刚刚'],[9,'9秒前'],[59,'59秒前'],[60,'1分钟前'],[120,'2分钟前'],[3600,'1小时前'],[86400,'1天前']])check(refreshAge(new Date(referenceTime-seconds*1000).toISOString(),referenceTime)===label,'relative refresh time boundary: '+seconds);
+  check(refreshAge('invalid',referenceTime)===''&&refreshAge(new Date(referenceTime+1000).toISOString(),referenceTime)==='刚刚','missing timestamps and clock skew do not display invalid ages');
   const selectedRelay=state.providers.find(p=>p.id===detailId),selectedListEntry=matchingCache(detailId,'today'),selectedBalance=selectedListEntry?.summary?.balance||selectedListEntry?.balance;
   check(document.querySelector('[data-id="'+detailId+'"] .provider-subtitle').textContent===`余额 ${balanceText(selectedBalance)} USD`,'left relay row displays cached balance instead of automatic API label');
   check(document.querySelector('#importCurrent').getAttribute('aria-label')==='导入当前 Codex 配置'&&Boolean(document.querySelector('#importCurrent svg')),'import action has a recognizable icon and label');
@@ -57,9 +64,25 @@
   window.relay={...modelApi,listModels:async()=>({ok:false,error:'HTTP 401：API 密钥无效'})};await modelPicker.load();check($('modelStatus').textContent.includes('401')&&$('modelName').value==='gpt-codex-mini','failed fetch keeps chosen model and explains error');window.relay=modelApi;
   modelPicker.open(false);$('reasoningPicker').querySelector('.filter-trigger').click();check($('modelMenu').classList.contains('hidden'),'opening effort closes model menu');
   const effortTrigger=$('reasoningPicker').querySelector('.filter-trigger');
+  for(const value of ['xhigh','xhigh','']){
+    if(effortTrigger.getAttribute('aria-expanded')!=='true')effortTrigger.click();
+    const index=Array.from($('reasoning').options).findIndex(option=>option.value===value);
+    $('reasoningMenu').querySelector('[data-index="'+index+'"] .filter-option-copy > span').click();
+    check($('reasoning').value===value&&$('reasoningValue').textContent===$('reasoning').selectedOptions[0].textContent,'mouse effort selection updates value');
+    check($('reasoningMenu').classList.contains('hidden')&&!$('reasoningPicker').classList.contains('is-open')&&effortTrigger.getAttribute('aria-expanded')==='false','mouse effort selection stays closed, including unchanged selection');
+  }
+  for(const value of ['newapi','newapi','auto']){
+    const trigger=$('adapterPicker').querySelector('.filter-trigger');trigger.click();
+    const index=Array.from($('adapter').options).findIndex(option=>option.value===value);
+    $('adapterMenu').querySelector('[data-index="'+index+'"] .filter-check').dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+    check($('adapter').value===value&&$('adapterValue').textContent===$('adapter').selectedOptions[0].textContent,'mouse adapter selection updates value');
+    check($('adapterMenu').classList.contains('hidden')&&!$('adapterPicker').classList.contains('is-open')&&trigger.getAttribute('aria-expanded')==='false','mouse adapter selection stays closed, including checkmark clicks');
+  }
+  effortTrigger.click();
   for(let i=0;i<3;i++)effortTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
   effortTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
   check($('reasoning').value==='high'&&$('reasoningValue').textContent==='high','custom effort selector preserves keyboard selection: '+$('reasoning').value+' / '+$('reasoningValue').textContent+' / '+effortTrigger.getAttribute('aria-expanded'));
+  check($('reasoningMenu').classList.contains('hidden')&&effortTrigger.getAttribute('aria-expanded')==='false','keyboard effort selection stays closed');
   $('accountOptions').open=true;
   await new Promise(resolve=>setTimeout(resolve,80));check(connectionCalls===0,'expanding does not query');
   $('apiKey').dispatchEvent(new Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,800));check(connectionCalls===0,'editing does not query');
@@ -119,7 +142,12 @@
   let inspections=0;const originalApi=window.relay;
   try{
     window.relay={...originalApi,inspect:input=>{inspections++;return originalApi.inspect(input);}};
-    await refreshCurrentIfStale();check(inspections===0,'fresh cache avoids reopening fetch');
+    await openDetails(activeId);check(inspections===0,'fresh cache avoids selection fetch');
+    check($('detailRefreshTime').textContent.startsWith('上次刷新：'+dateTime(currentDetail.at)+' · '),'applied relay displays its refresh time and age');
+    const timedDetail=currentDetail,beforeAgeTick=inspections;
+    currentDetail={...timedDetail,at:new Date(Date.now()-120000).toISOString()};syncRefreshControls();
+    check($('detailRefreshTime').textContent.endsWith(' · 2分钟前')&&inspections===beforeAgeTick,'elapsed refresh time updates without a query');
+    currentDetail=timedDetail;syncRefreshControls();
     await openDetails(activeId);check(!$('detailBody').textContent.includes('本地查询记录'),'local query history removed');check(!$('modelChart')&&Boolean($('trendChart').querySelector('svg')),'trend renders without model distribution');check(document.querySelector('.analytics-wide .chart-card').getBoundingClientRect().width>document.querySelector('.analytics-wide').getBoundingClientRect().width*0.95,'trend spans full row');
     const other=others[0],configBefore=JSON.stringify(state.config);
     await openDetails(other.id);check(detailId===other.id&&$('pageTitle').textContent===other.name,'selecting relay immediately updates right panel');
@@ -129,7 +157,7 @@
     check(getComputedStyle(appliedCard,'::before').content==='""'&&getComputedStyle(viewedCard,'::before').content==='none','orange indicator stays on applied relay when viewing another');
     check(getComputedStyle(appliedCard).borderLeftColor!==getComputedStyle(viewedCard).borderLeftColor,'viewing an inactive relay never gives it the active border');
     check(document.querySelector('[data-id="'+other.id+'"] .provider-select').getAttribute('aria-current')==='true','selection indicated accessibly');
-    check($('detailCountdown').textContent.includes('手动刷新'),'inactive relay does not promise automatic refresh');
+    check($('detailRefreshTime').textContent.startsWith('上次刷新：'+dateTime(currentDetail.at)+' · ')&&!$('detailBody').textContent.includes('非使用中中转'),'viewed relay displays its own refresh time and age');
     check(JSON.parse(localStorage.getItem(detailStorageKey)).some(r=>r.id===other.id&&r.usage),'full daily details survive WebView teardown');
     navigate('settings');
     check(getComputedStyle($('providerList').querySelector('.provider-card.active'),'::before').content==='""','applied relay remains highlighted on settings page');
@@ -142,13 +170,59 @@
     let resolveLate;
     window.relay={...window.relay,inspect:input=>input.id===other.id?new Promise(resolve=>{resolveLate=resolve;}):originalApi.inspect(input)};
     cache.delete(other.id+':today');
-    const lateSelection=openDetails(other.id);await waitFor(()=>Boolean(resolveLate),'slow relay request begins');
-    await openDetails(activeId);resolveLate({ok:true,data:lateResponse});await lateSelection;
+    await openDetails(other.id);check(!resolveLate,'uncached selection does not start a request');
+    const lateRefresh=refreshDetails();await waitFor(()=>Boolean(resolveLate),'explicit slow relay refresh begins');
+    await openDetails(activeId);resolveLate({ok:true,data:lateResponse});await lateRefresh;
     check(detailId===activeId&&$('pageTitle').textContent===state.providers.find(p=>p.id===activeId).name,'late relay response cannot replace newly selected panel');
     window.relay={...originalApi,inspect:input=>{inspections++;return originalApi.inspect(input);}};
     const beforeReopen=inspections;await openDetails(activeId);check(inspections===beforeReopen,'fresh in-memory details reused');
     const saved=matchingCache(activeId,'today');cache.set(activeId+':today',{...saved,summary:{...saved.summary,checkedAt:new Date(Date.now()-61000).toISOString()}});
-    await refreshCurrentIfStale();check(inspections===beforeReopen+1,'expired current cache refreshes');
+    await openDetails(other.id);
+    document.querySelector('[data-id="'+activeId+'"] .provider-select').click();
+    await waitFor(()=>detailId===activeId,'stale cached relay selected');
+    check(inspections===beforeReopen&&Boolean(document.querySelector('#trendChart svg')),'expired cache stays visible without selection fetch');
+    cache.delete(other.id+':today');
+    document.querySelector('[data-id="'+other.id+'"] .provider-select').click();
+    await waitFor(()=>detailId===other.id,'uncached relay selected');
+    check(inspections===beforeReopen&&$('detailBody').textContent.includes('尚未查询余额与用量')&&!$('refreshDetail').disabled,'uncached selection waits for explicit refresh');
+    check($('detailRefreshTime').textContent==='上次刷新：尚未刷新','uncached selection clears the previous relay timestamp');
+    $('pauseAuto').click();check(!auto&&$('pauseAuto').getAttribute('aria-pressed')==='true'&&$('pauseAuto').textContent==='继续自动刷新','right toolbar pauses automatic refresh');
+    nextRefresh=Date.now()-100;updateCountdown();check(inspections===beforeReopen,'paused timer does not query');
+    $('refreshDetail').click();await waitFor(()=>!pending.size,'right toolbar manual refresh completes while automatic refresh is paused');
+    check(inspections===beforeReopen+1&&Boolean(document.querySelector('#trendChart svg'))&&!auto,'manual refresh loads the selected relay while paused');
+    const successfulApi=window.relay,successfulDetail=matchingCache(other.id),successfulActive=matchingCache(activeId);
+    try{
+      const failureResult={...successfulDetail,at:new Date().toISOString(),usage:null,usageError:'HTTP 503：用量服务暂时不可用'};
+      window.relay={...successfulApi,inspect:async()=>({ok:true,data:failureResult})};
+      $('refreshDetail').click();await waitFor(()=>!pending.size&&!$('refreshDetail').disabled,'structured usage failure completes');
+      check($('toast').classList.contains('error')&&!$('toast').classList.contains('hidden')&&$('toast').textContent.includes(other.name)&&$('toast').textContent.includes('用量刷新失败')&&$('toast').textContent.includes('503'),'structured usage failure produces a visible named error');
+      check($('detailRefreshTime').textContent.startsWith('上次刷新：'+dateTime(failureResult.at)+' · '),'failed result has its refresh timestamp and age');
+      window.relay={...successfulApi,inspect:async()=>({ok:false,error:'HTTP 401：密钥无效'})};
+      $('refreshDetail').click();await waitFor(()=>!pending.size&&!$('refreshDetail').disabled,'request failure completes');
+      check($('toast').textContent.includes('刷新失败')&&$('toast').textContent.includes('401')&&detailId===other.id,'request failure explains the reason and permits retry');
+      window.relay={...successfulApi,inspect:async()=>({ok:true,data:{...successfulDetail,balance:{value:null,message:'HTTP 403：余额权限不足'},usageError:''}})};
+      $('refreshDetail').click();await waitFor(()=>!pending.size&&!$('refreshDetail').disabled,'balance failure completes');
+      check($('toast').textContent.includes('余额刷新失败')&&$('toast').textContent.includes('403')&&Boolean(document.querySelector('#trendChart svg')),'partial balance failure is reported while usage remains visible');
+      window.relay={...successfulApi,inspect:async input=>({ok:true,data:{...successfulActive,id:input.id,usage:null,usageError:'HTTP 502：站点暂时不可用'}})};
+      document.querySelector('[data-id="'+activeId+'"] [data-action=refresh]').click();await waitFor(()=>!pending.size,'sidebar manual failure completes');
+      check($('toast').textContent.includes(state.providers.find(p=>p.id===activeId).name)&&$('toast').textContent.includes('502'),'sidebar manual refresh also reports failures for its relay');
+      window.relay=successfulApi;cache.set(activeId+':today',successfulActive);
+      $('refreshDetail').click();await waitFor(()=>!pending.size&&!$('refreshDetail').disabled,'manual retry succeeds after failures');
+      check(!currentDetail.usageError&&Boolean(document.querySelector('#trendChart svg')),'manual refresh can recover after failure');
+    }finally{window.relay=successfulApi;cache.set(activeId+':today',successfulActive);persistDetails();}
+    const beforeApply=inspections;
+    document.querySelector('#detailActions [data-action=switch]').click();
+    await waitFor(()=>state.providers.find(p=>p.active)?.id===other.id,'apply chosen relay');
+    check(inspections===beforeApply,'applying a relay does not trigger a refresh');
+    await openDetails(activeId);document.querySelector('#detailActions [data-action=switch]').click();
+    await waitFor(()=>state.providers.find(p=>p.active)?.id===activeId,'restore original applied relay');
+    check(inspections===beforeApply,'reapplying the original relay does not query');
+    await openDetails(other.id);
+    let automaticIds=[];window.relay={...originalApi,inspect:input=>{automaticIds.push(input.id);return originalApi.inspect(input);}};
+    $('pauseAuto').click();check(auto&&$('pauseAuto').getAttribute('aria-pressed')==='false','right toolbar resumes automatic refresh');
+    nextRefresh=Date.now()-100;updateCountdown();await waitFor(()=>!allBusy&&!pending.size,'scheduled automatic refresh completes');
+    check(JSON.stringify(automaticIds)===JSON.stringify([activeId])&&detailId===other.id,'timer refreshes only applied relay and preserves viewed relay');
+    check($('detailRefreshTime').textContent.startsWith('上次刷新：'+dateTime(currentDetail.at)+' · ')&&!$('refreshCountdown')&&!$('detailCountdown'),'automatic tick updates age without restoring countdown or relay status text');
   }finally{window.relay=originalApi;navigate('providers');}
-  window.draftSmokeResult={ok:true,modelDiscovery:true,searchableModelPicker:true,chosenModelSaved:true,staleModelsDiscarded:true,manualModelPreserved:true,requiredFieldsClear:true,appliedRelayFirst:true,manualConnectionTest:true,noAutomaticDraftRequests:true,noBalanceSync:true,fieldErrors:true,persistentCacheHydration:true,freshCacheAvoidsFetch:true,expiredCacheRefreshes:true,localQueryHistoryRemoved:true,keepsAutomaticSelection:true,manualTypePreserved:true,blankSiteSaves:true,staleDraftDiscarded:true,listDateRemoved:true,activeOnlyRefresh:true,individualRefresh:true,loginStartupSetting:true,startupRepeatedClicks:true,startupSaveFailureRecovery:true,silentStartupSetting:true,silentRequiresLoginStartup:true};
+  window.draftSmokeResult={ok:true,modelDiscovery:true,searchableModelPicker:true,chosenModelSaved:true,staleModelsDiscarded:true,manualModelPreserved:true,requiredFieldsClear:true,appliedRelayFirst:true,manualConnectionTest:true,noAutomaticDraftRequests:true,noBalanceSync:true,fieldErrors:true,persistentCacheHydration:true,freshCacheAvoidsFetch:true,noRefreshOnSelection:true,noRefreshOnApply:true,rightToolbarRefreshControls:true,relativeRefreshTime:true,refreshFailureFeedback:true,pausedManualRefresh:true,activeOnlyTimer:true,localQueryHistoryRemoved:true,keepsAutomaticSelection:true,manualTypePreserved:true,blankSiteSaves:true,staleDraftDiscarded:true,listDateRemoved:true,activeOnlyRefresh:true,individualRefresh:true,loginStartupSetting:true,startupRepeatedClicks:true,startupSaveFailureRecovery:true,silentStartupSetting:true,silentRequiresLoginStartup:true};
 })().catch(error=>{window.draftSmokeResult={ok:false,error:String(error.stack||error)};});

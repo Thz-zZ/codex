@@ -5,6 +5,20 @@ const fmt=v=>Number.isFinite(v)?Number(v).toLocaleString('en-US'):'—';
 const compact=v=>Number.isFinite(v)?Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:2}).format(v):'—';
 const rate=v=>Number.isFinite(v)?(v*100).toFixed(2)+'%':'—';
 const dateTime=v=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'—';
+function refreshAge(at,now=Date.now()){
+  const timestamp=Date.parse(at);if(!Number.isFinite(timestamp))return '';
+  const seconds=Math.max(0,Math.floor((now-timestamp)/1000));
+  if(seconds<1)return '刚刚';
+  if(seconds<60)return seconds+'秒前';
+  if(seconds<3600)return Math.floor(seconds/60)+'分钟前';
+  if(seconds<86400)return Math.floor(seconds/3600)+'小时前';
+  return Math.floor(seconds/86400)+'天前';
+}
+function updateRefreshTime(){
+  const at=currentDetail?.at||currentDetail?.summary?.checkedAt||currentDetail?.checkedAt,age=refreshAge(at);
+  const label=age?'上次刷新：'+dateTime(at)+' · '+age:'上次刷新：尚未刷新';
+  if($('detailRefreshTime').textContent!==label)$('detailRefreshTime').textContent=label;
+}
 const adapterLabel=p=>{const type=p.adapter==='auto'?p.detectedAdapter:p.adapter;return (p.adapter==='auto'?'自动 · ':'')+(type==='sub2api'?'Sub2API':type==='newapi'?'NewAPI':'待识别');};
 const balanceText=b=>Number.isFinite(b?.value)?b.value.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4}):'—';
 let state={providers:[],history:[],config:{}},page='providers',detailId=null,detailEpoch=0,auto=true,nextRefresh=Date.now()+60000,allBusy=false,toastTimer,editorEpoch=0,siteFollowsBase=true,rangePeriod='today',draggedId=null,reorderBusy=false,currentDetail=null,chartGranularity='auto',detectEpoch=0;
@@ -29,7 +43,8 @@ function enhanceFilter(id,icon){
   const choose=index=>{const changed=source.selectedIndex!==index;source.selectedIndex=index;sync();trigger.focus();if(changed)source.dispatchEvent(new Event('change',{bubbles:true}));};
   trigger.addEventListener('click',()=>menu.classList.contains('hidden')?open():close());
   menu.addEventListener('pointerdown',event=>event.preventDefault());
-  menu.addEventListener('click',event=>{const option=event.target.closest('[data-index]');if(option)choose(Number(option.dataset.index));});
+  // Prevent the enclosing label from clicking the trigger again after selection.
+  menu.addEventListener('click',event=>{const option=event.target.closest('[data-index]');if(option){event.preventDefault();choose(Number(option.dataset.index));}});
   trigger.addEventListener('keydown',event=>{const isOpen=!menu.classList.contains('hidden'),length=source.options.length;if(event.key==='Tab'){close();return;}if(event.key==='Escape'){if(isOpen){event.preventDefault();event.stopPropagation();close();}return;}if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();if(!isOpen)open();else if(event.key==='ArrowDown')active=(active+1)%length;else if(event.key==='ArrowUp')active=(active+length-1)%length;if(event.key==='Home')active=0;if(event.key==='End')active=length-1;highlight();}else if(['Enter',' '].includes(event.key)){event.preventDefault();if(isOpen)choose(active);else open();}else if(event.key.length===1&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();if(!isOpen)open();search=Date.now()-searchAt>700?event.key:search+event.key;searchAt=Date.now();const index=options().findIndex(o=>o.textContent.toLowerCase().startsWith(search.toLowerCase()));if(index>=0){active=index;highlight();}}});
   root.addEventListener('focusout',event=>{if(!root.contains(event.relatedTarget))close();});
   document.addEventListener('pointerdown',event=>{if(!root.contains(event.target))close();});
@@ -41,7 +56,6 @@ function toast(message,error=false){clearTimeout(toastTimer);$('toast').textCont
 function confirmAction(title,text){return new Promise(resolve=>{$('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmDialog').showModal();let done=false;const finish=value=>{if(done)return;done=true;$('confirmDialog').close();$('confirmDialog').removeEventListener('cancel',cancel);resolve(value);};const cancel=e=>{e.preventDefault();finish(false);};$('confirmCancel').onclick=()=>finish(false);$('confirmOkay').onclick=()=>finish(true);$('confirmDialog').addEventListener('cancel',cancel);});}
 function setState(value){state=value;for(const summary of state.usageCache||[]){const key=summary.id+':today',existing=cache.get(key);if(!existing||Date.parse(summary.checkedAt)>Date.parse(existing.summary?.checkedAt||existing.checkedAt||existing.at))cache.set(key,summary);}hydrateDetails();renderState();}
 function cacheFresh(value){const record=value?.summary||value,at=Date.parse(record&&'checkedAt' in record?record.checkedAt:record?.at);return Number.isFinite(at)&&Date.now()-at>=0&&Date.now()-at<60000;}
-async function refreshCurrentIfStale(){const p=state.providers.find(p=>p.active);if(p&&!cacheFresh(matchingCache(p.id,'today')))await refreshAll();}
 function cachedTime(value){return value?new Date(value).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'尚未查询';}
 function navigate(target){
   chartHover?.hide();page=target==='providers'&&detailId?'details':target;
@@ -78,7 +92,8 @@ function renderProviders(){
   $('providerList').innerHTML=state.providers.map((p,i)=>{
     const busy=[...pending].some(k=>k.startsWith(p.id+':')),entry=matchingCache(p.id,'today'),snapshot=entry?.summary||entry,balance=snapshot?.balance;
     const balanceLabel=Number.isFinite(balance?.value)?`余额 ${balanceText(balance)} USD`:busy&&!entry?'正在查询余额':balance?.message?'余额暂不可用':'余额未查询';
-    return `<article class="provider-card${p.active?' active':''}${page==='details'&&p.id===detailId?' is-viewing':''}" data-id="${esc(p.id)}"><button class="drag-handle" data-tooltip="拖动排序；Alt + ↑ / ↓ 也可移动" aria-label="拖动排序 ${esc(p.name)}"${reorderBusy?' disabled':''}><svg viewBox="0 0 16 24" width="11" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="6" r="1.3"/><circle cx="11" cy="6" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/><circle cx="5" cy="18" r="1.3"/><circle cx="11" cy="18" r="1.3"/></svg></button><button class="provider-select" data-action="details" aria-current="${page==='details'&&p.id===detailId?'true':'false'}" aria-label="查看 ${esc(p.name)} 的余额与用量"><span class="avatar tone-${i%4}">${esc(p.name.slice(0,1))}</span><span class="provider-info"><span class="provider-title"><strong data-tooltip="${esc(p.name)}">${esc(p.name)}</strong>${p.active?'<span class="badge live">使用中</span>':''}</span><span class="provider-subtitle${balance?.value<0?' negative':''}" data-tooltip="${esc(balance?.message||balance?.source||balanceLabel)}">${esc(balanceLabel)}</span></span></button><button class="icon-button refresh-provider" data-action="refresh" data-tooltip="刷新${esc(p.name)}今天的余额与用量" aria-label="刷新${esc(p.name)}"${busy?' disabled aria-busy="true"':''}>↻</button></article>`;
+    const balanceClass=Number.isFinite(balance?.value)?(balance.value<0?' negative':' positive'):'';
+    return `<article class="provider-card${p.active?' active':''}${page==='details'&&p.id===detailId?' is-viewing':''}" data-id="${esc(p.id)}"><button class="drag-handle" data-tooltip="拖动排序；Alt + ↑ / ↓ 也可移动" aria-label="拖动排序 ${esc(p.name)}"${reorderBusy?' disabled':''}><svg viewBox="0 0 16 24" width="11" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="6" r="1.3"/><circle cx="11" cy="6" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/><circle cx="5" cy="18" r="1.3"/><circle cx="11" cy="18" r="1.3"/></svg></button><button class="provider-select" data-action="details" aria-current="${page==='details'&&p.id===detailId?'true':'false'}" aria-label="查看 ${esc(p.name)} 的余额与用量"><span class="avatar tone-${i%4}">${esc(p.name.slice(0,1))}</span><span class="provider-info"><span class="provider-title"><strong data-tooltip="${esc(p.name)}">${esc(p.name)}</strong>${p.active?'<span class="badge live">使用中</span>':''}</span><span class="provider-subtitle${balanceClass}" data-tooltip="${esc(balance?.message||balance?.source||balanceLabel)}">${esc(balanceLabel)}</span></span></button><button class="icon-button refresh-provider" data-action="refresh" data-tooltip="刷新${esc(p.name)}今天的余额与用量" aria-label="刷新${esc(p.name)}"${busy?' disabled aria-busy="true"':''}>↻</button></article>`;
   }).join('');
 }
 let draftDetection=null;
@@ -123,6 +138,7 @@ function renderCharts(){
 function renderDetail(r,loading=false){
   chartHover?.hide();
   currentDetail=r;
+  updateRefreshTime();
   if(!r){$('detailBody').innerHTML='<div class="empty-state"><div class="empty-icon">↻</div><h2>'+(loading?'正在查询余额与记录':'尚未查询余额与用量')+'</h2><p>'+(loading?'首次连接可能需要几秒钟。':'点击上方“刷新数据”，查看余额、缓存率与使用记录。')+'</p></div>';return;}
   const u=r.usage,summary=r.summary||r,b=r.balance||summary.balance,t=u?.totals||summary.totals,excluded=t?.excluded??t?.missing??0;
   const metric=(label,value,note,featured=false)=>`<div class="metric-card${featured?' featured':''}"><div class="metric-label">${esc(label)}</div><div class="metric-value">${value}</div><div class="metric-note" data-tooltip="${esc(note)}">${esc(note)}</div></div>`;
@@ -131,11 +147,12 @@ function renderDetail(r,loading=false){
   filterPickers.get('modelFilter')?.sync();
   let html=`<div class="metrics-grid">${metric(usageLabel()+'消费',balanceText({value:t?.cost})+(Number.isFinite(t?.cost)?'<small>USD</small>':''),Number.isFinite(t?.cost)?'当前 API 密钥 · 实际扣费':'接口未完整提供费用数据')}${metric('Token 缓存命中率',rate(t?.tokenRate),excluded?`${excluded} 条或组无效数据已排除`:'按输入 Token 用量加权')}${metric('缓存读取 Token',compact(t?.read),`总输入 ${compact(t?.input)}`)}${metric('请求数量',fmt(t?.requests),u?.mode==='summary'?'所选时间段汇总':`请求命中率 ${rate(t?.requestRate)}`)}</div>`;
   if(r.usageError)html+=`<div class="notice error">记录查询失败：${esc(r.usageError)}</div>`;
-  if(u)html+=`<div class="detail-meta"><strong>用量分析 <small>${esc(rangeLabel(rangePeriod))}</small></strong><span>更新于 ${esc(dateTime(r.at))} · <span id="detailCountdown">每 60 秒刷新</span></span></div><div class="notice">${esc(u.note)} ${esc(u.costNote||'')}</div>`;
+  html+=`<div class="detail-meta"><strong>用量分析 <small>${esc(rangeLabel(rangePeriod))}</small></strong></div>`;
+  if(u)html+=`<div class="notice">${esc(u.note)} ${esc(u.costNote||'')}</div>`;
   if(u){html+=`<div class="analytics-grid analytics-wide"><section class="chart-card"><div class="chart-heading"><h2>Token 使用趋势</h2><div class="grain-control" role="group" aria-label="趋势粒度"><button data-grain="auto" aria-pressed="true">自动</button><button data-grain="hour" aria-pressed="false">按时</button><button data-grain="day" aria-pressed="false">按天</button></div></div><div id="trendChart"></div></section></div>`;
     html+=tableCard('近期请求',['时间','模型','输入 Token','输出 Token','缓存读取','缓存写入','缓存率'],u.logs.map(l=>[l.timestamp?esc(new Date(l.timestamp*1000).toLocaleString('zh-CN',{hour12:false})):'—',esc(l.model),fmt(l.input),fmt(l.output),fmt(l.read),fmt(l.write),`<span class="rate-cell" data-tooltip="${esc(l.reason||'')}">${rate(l.rate)}</span>`]),u.mode==='summary'?'Sub2API 接口仅返回汇总，不提供逐条请求。':'暂无近期请求。');}
   if(!u)html+='<div class="detail-placeholder"><span class="secure-dot"></span> 已显示上次保存的数据，点击刷新可加载完整用量与趋势。</div>';
-  $('detailBody').innerHTML=html;renderCharts();updateCountdownText();
+  $('detailBody').innerHTML=html;renderCharts();syncRefreshControls();
 }
 async function fetchProvider(id,period=rangePeriod,model='all'){
   const token=id+':'+period+':'+model;if(requests.has(token))return requests.get(token);pending.add(token);renderProviders();
@@ -143,9 +160,9 @@ async function fetchProvider(id,period=rangePeriod,model='all'){
   requests.set(token,task);return task;
 }
 async function refreshAll(){
-  if(allBusy)return;allBusy=true;$('refreshAll').disabled=true;$('refreshAll').textContent='查询中…';let failures=0;const ids=state.providers.filter(p=>p.active).map(p=>p.id),requestedPeriod='today';
+  if(allBusy)return;allBusy=true;let failures=0;const ids=state.providers.filter(p=>p.active).map(p=>p.id),requestedPeriod='today';
   const worker=async()=>{while(ids.length){const id=ids.shift();try{await fetchProvider(id,requestedPeriod);}catch{failures++;}}};
-  try{await Promise.all([worker(),worker()]);if(page==='details'&&rangePeriod==='today'&&$('modelFilter').value==='all'&&state.providers.find(p=>p.id===detailId)?.active)renderDetail(matchingCache(detailId)||currentDetail);if(failures)toast(`${failures} 个中转查询失败，请手动重试。`,true);}finally{allBusy=false;$('refreshAll').disabled=false;$('refreshAll').textContent='↻ 刷新使用中中转';nextRefresh=Date.now()+60000;}
+  try{await Promise.all([worker(),worker()]);if(page==='details'&&rangePeriod==='today'&&$('modelFilter').value==='all'&&state.providers.find(p=>p.id===detailId)?.active)renderDetail(matchingCache(detailId)||currentDetail);if(failures)toast(`${failures} 个中转查询失败，请手动重试。`,true);}finally{allBusy=false;nextRefresh=Date.now()+60000;syncRefreshControls();}
 
 }
 async function openDetails(id){
@@ -153,16 +170,22 @@ async function openDetails(id){
   const changed=detailId!==id;detailId=id;detailEpoch++;
   if(changed){rangePeriod='today';syncRangeControls();chartGranularity='auto';hiddenSeries.clear();}
   $('modelFilter').innerHTML='<option value="all">全部模型</option>';filterPickers.get('modelFilter')?.sync();
-  $('refreshDetail').disabled=false;navigate('details');
+  $('refreshDetail').disabled=[...pending].some(key=>key.startsWith(id+':'));navigate('details');
   const saved=matchingCache(id);renderDetail(saved||null);
-  if(!saved?.usage||!cacheFresh(saved))await refreshDetails();
+  syncRefreshControls();
 }
-async function refreshDetails(){
+function reportRefreshFailure(id,result){
+  const name=state.providers.find(p=>p.id===id)?.name||'中转';
+  const usageError=result.usageError||(!result.usage?'接口未返回用量数据。':'');
+  if(usageError)toast(`${name} 用量刷新失败：${usageError}`,true);
+  else if(!Number.isFinite(result.balance?.value))toast(`${name} 余额刷新失败：${result.balance?.message||'接口未返回账户余额。'}`,true);
+}
+async function refreshDetails(notifyFailure=true){
   if(!detailId)return;const id=detailId,epoch=++detailEpoch,period=$('period').value,model=$('modelFilter').value;$('refreshDetail').disabled=true;if(!currentDetail)renderDetail(null,true);
-  try{const result=await fetchProvider(id,period,model);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod){renderSelectedHeader();renderDetail(result);}}catch(e){if(epoch===detailEpoch){toast(e.message,true);const saved=matchingCache(id);if(saved)renderDetail(saved);else $('detailBody').innerHTML=`<div class="notice error">${esc(e.message)}</div>`;}}finally{if(epoch===detailEpoch)$('refreshDetail').disabled=false;nextRefresh=Date.now()+60000;}
+  try{const result=await fetchProvider(id,period,model);if(result&&notifyFailure)reportRefreshFailure(id,result);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod){renderSelectedHeader();renderDetail(result);}}catch(e){if(notifyFailure||epoch===detailEpoch)toast(`${state.providers.find(p=>p.id===id)?.name||'中转'} 刷新失败：${e.message}`,true);if(epoch===detailEpoch){const saved=matchingCache(id);if(saved)renderDetail(saved);else $('detailBody').innerHTML=`<div class="notice error">${esc(e.message)}</div>`;}}finally{if(epoch===detailEpoch)$('refreshDetail').disabled=false;nextRefresh=Date.now()+60000;}
 }
 window.openDetails=openDetails;window.refreshDetails=refreshDetails;
-document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{detailEpoch++;navigate(b.dataset.nav);if(b.dataset.nav==='providers')refreshCurrentIfStale();}));
+document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{detailEpoch++;navigate(b.dataset.nav);}));
 $('addProvider').onclick=()=>openEditor().catch(e=>toast(e.message,true));$('closeDialog').onclick=$('cancelDialog').onclick=closeEditor;$('adapter').onchange=()=>{invalidateDetection();updateAccountForm();};
 function setSecretVisibility(id,visible){const input=$(id),button=$(id+'Eye'),label=id==='apiKey'?'API 密钥':'账户访问令牌';input.type=visible?'text':'password';button.setAttribute('aria-pressed',String(visible));button.setAttribute('aria-label',(visible?'隐藏':'显示')+label);button.dataset.tooltip=(visible?'隐藏':'显示')+label;button.classList.toggle('revealed',visible);}
 function clearEditorSecrets(){for(const id of ['apiKey','accountKey']){$(id).value='';setSecretVisibility(id,false);}}
@@ -184,7 +207,7 @@ $('providerDialog').addEventListener('cancel',e=>{e.preventDefault();closeEditor
 $('providerDialog').addEventListener('close',()=>{if(!$('providerDialog').open)clearEditorSecrets();});
 async function handleProviderAction(e){
   const b=e.target.closest('[data-action]');if(!b)return;const id=b.closest('[data-id]')?.dataset.id,p=state.providers.find(p=>p.id===id);
-  try{switch(b.dataset.action){case'refresh':b.disabled=true;if(page==='details'&&detailId===id&&rangePeriod==='today')await refreshDetails();else await fetchProvider(id,'today');break;case'edit':await openEditor(id);break;case'details':if(!draggedId)await openDetails(id);break;case'switch':b.disabled=true;setState(await call('switchProvider',{id}));toast(`已应用 ${p.name}。重新启动 Codex，或在 CLI 开启新会话后生效。`);await openDetails(id);break;case'delete':if(await confirmAction('删除中转',`删除“${p.name}”及其保存的密钥？当前 Codex 配置不会因此更改。`)){setState(await call('deleteProvider',{id}));for(const key of cache.keys())if(key.startsWith(id+':'))cache.delete(key);toast('中转已删除。');if(detailId)await openDetails(detailId);}break;}}catch(error){toast(error.message,true);}finally{b.disabled=false;}
+  try{switch(b.dataset.action){case'refresh':b.disabled=true;if(page==='details'&&detailId===id&&rangePeriod==='today')await refreshDetails();else{const result=await fetchProvider(id,'today');if(result)reportRefreshFailure(id,result);}break;case'edit':await openEditor(id);break;case'details':if(!draggedId)await openDetails(id);break;case'switch':b.disabled=true;setState(await call('switchProvider',{id}));toast(`已应用 ${p.name}。重新启动 Codex，或在 CLI 开启新会话后生效。`);await openDetails(id);break;case'delete':if(await confirmAction('删除中转',`删除“${p.name}”及其保存的密钥？当前 Codex 配置不会因此更改。`)){setState(await call('deleteProvider',{id}));for(const key of cache.keys())if(key.startsWith(id+':'))cache.delete(key);toast('中转已删除。');if(detailId)await openDetails(detailId);}break;}}catch(error){toast((b.dataset.action==='refresh'?`${p?.name||'中转'} 刷新失败：`:'')+error.message,true);}finally{b.disabled=false;}
 }
 $('providerList').addEventListener('click',handleProviderAction);
 $('detailActions').addEventListener('click',handleProviderAction);
@@ -234,18 +257,17 @@ for(const id of ['adapter','reasoning']){
 }
 const modelPicker=new RelayModelPicker({fetch:input=>call('listModels',input),getCredentials:()=>({baseUrl:$('baseUrl').value.trim(),key:$('apiKey').value.trim()}),isOpen:()=>$('providerDialog').open});
 $('chooseConfigDir').onclick=async()=>{try{setState(await call('chooseConfigDir'));}catch(e){toast(e.message,true);}};$('openDataDir').onclick=async()=>{try{await call('openDataDir');}catch(e){toast(e.message,true);}};
-$('refreshAll').onclick=refreshAll;$('refreshDetail').onclick=refreshDetails;$('period').onchange=onRangeChange;$('modelFilter').onchange=refreshDetails;
+$('refreshDetail').onclick=()=>refreshDetails();$('period').onchange=onRangeChange;$('modelFilter').onchange=()=>refreshDetails();
 const dateIcon='<svg class="filter-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4M17 3v4M3 10h18M8 14h2M14 14h2M8 17h2"/></svg>';
 enhanceFilter('period',dateIcon);
 enhanceFilter('modelFilter','<svg class="filter-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg>');
-$('pauseAuto').onclick=()=>{auto=!auto;$('pauseAuto').textContent=auto?'暂停':'继续';nextRefresh=Date.now()+60000;updateCountdown();};
-function updateCountdownText(){
+$('pauseAuto').onclick=()=>{auto=!auto;$('pauseAuto').textContent=auto?'暂停自动刷新':'继续自动刷新';$('pauseAuto').setAttribute('aria-pressed',String(!auto));$('pauseAuto').dataset.tooltip=(auto?'暂停':'继续')+'使用中中转的自动刷新';nextRefresh=Date.now()+60000;updateCountdown();};
+function syncRefreshControls(){
+  updateRefreshTime();
   const editing=(($('providerDialog').open||$('confirmDialog').open||$('dateDialog').open)&&document.visibilityState!=='hidden')||draggedId||reorderBusy;
-  const message=!auto?'自动刷新已暂停':pending.size?'正在刷新…':editing?'编辑中':`下次刷新 ${Math.max(0,Math.ceil((nextRefresh-Date.now())/1000))} 秒`;
-  $('refreshCountdown').textContent=message;
-  if($('detailCountdown'))$('detailCountdown').textContent=state.providers.find(p=>p.id===detailId)?.active?message:'非使用中中转 · 手动刷新';
+  $('refreshDetail').disabled=!detailId||[...pending].some(key=>key.startsWith(detailId+':'));
   return editing;
 }
-function updateCountdown(){const editing=updateCountdownText();if(auto&&!editing&&Date.now()>=nextRefresh&&!pending.size&&!allBusy){nextRefresh=Date.now()+60000;if(page==='details'&&state.providers.find(p=>p.id===detailId)?.active&&rangePeriod==='today')refreshDetails();else refreshAll();}}
+function updateCountdown(){const editing=syncRefreshControls();if(auto&&!editing&&Date.now()>=nextRefresh&&!pending.size&&!allBusy){nextRefresh=Date.now()+60000;if(page==='details'&&state.providers.find(p=>p.id===detailId)?.active&&rangePeriod==='today')refreshDetails(false);else refreshAll();}}
 setInterval(updateCountdown,1000);
-window.appReady=(async()=>{try{setState(await call('state'));if(detailId)await openDetails(detailId);}catch(error){$('providerList').innerHTML=`<div class="notice error">${esc(error.message)}</div>`;toast(error.message,true);}})();
+window.appReady=(async()=>{try{setState(await call('state'));window.relayUiReady=true;if(detailId){await openDetails(detailId);if(!currentDetail?.usage||!cacheFresh(currentDetail))await refreshDetails(false);}}catch(error){$('providerList').innerHTML=`<div class="notice error">${esc(error.message)}</div>`;toast(error.message,true);}})();

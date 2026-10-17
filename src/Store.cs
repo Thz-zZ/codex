@@ -24,7 +24,7 @@ internal sealed class Store {
     List<Dictionary<string,object>> History {get{return J.Arr(J.Get(Data,"history")).Select(J.Obj).ToList();}}
     List<Dictionary<string,object>> SnapshotsData {get{return J.Arr(J.Get(Data,"snapshots")).Select(J.Obj).ToList();}}
     public void Save(){J.Atomic(File,J.Encode(Data));}
-    public void SetAppSetting(string key,bool value){if(key!="launchAtLogin"&&key!="silentStartup")throw J.Error("未知启动设置。");var settings=J.Obj(J.Get(Data,"appSettings"));settings[key]=value;if(key=="launchAtLogin"&&!value)settings["silentStartup"]=false;Save();}
+    public void SetAppSetting(string key,bool value){if(key!="launchAtLogin"&&key!="silentStartup"&&key!="autoCheckUpdates")throw J.Error("未知应用设置。");var settings=J.Obj(J.Get(Data,"appSettings"));settings[key]=value;if(key=="launchAtLogin"&&!value)settings["silentStartup"]=false;Save();}
     Dictionary<string,object> Find(string id){var p=Providers.FirstOrDefault(x=>J.Str(x,"id")==id);if(p==null)throw J.Error("中转不存在。");return p;}
     string Key(object p,string name="keyEncrypted"){return Secure.Decrypt(J.Str(p,name));}
     Dictionary<string,object> Pub(Dictionary<string,object> p){var x=new Dictionary<string,object>(p);x.Remove("keyEncrypted");x.Remove("accountEncrypted");x["hasKey"]=J.Str(p,"keyEncrypted")!="";x["hasAccountKey"]=J.Str(p,"accountEncrypted")!="";return x;}

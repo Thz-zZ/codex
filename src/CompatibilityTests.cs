@@ -27,6 +27,7 @@ internal static class CompatibilityTests {
         UsageCacheChecks.Run(root,checks);
         ConnectionChecks.Run(checks).GetAwaiter().GetResult();
         ModelsChecks.Run(root,checks).GetAwaiter().GetResult();
+        UpdateChecks.Run(root,checks).GetAwaiter().GetResult();
         if(System.Net.ServicePointManager.SecurityProtocol!=System.Net.SecurityProtocolType.Tls12)throw J.Error("Modern TLS not initialized");
         string networkError=Usage.ErrorText(new System.Net.Http.HttpRequestException("发送请求时出错。",new System.Net.WebException("certificate fixture-secret",null,System.Net.WebExceptionStatus.TrustFailure,null)),"fixture-secret");
         if(!networkError.Contains("HTTPS")||!networkError.Contains("certificate")||networkError.Contains("fixture-secret"))throw J.Error("Network causes must be visible and redacted");

@@ -12,9 +12,13 @@
 
 ## 版本与应用打包
 
-当前版本为 **v1.1.3**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
+当前版本为 **v1.1.7**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
 
 运行 `build-release.ps1` 生成可直接运行的 Windows x64 应用文件夹。可通过 `-OutputDirectory` 指定新输出目录。发布包包含应用与会话服务 EXE、DLL、界面、许可、会话管理说明及版本记录。
+
+自动更新发布步骤见 [UPDATE-GUIDE.md](UPDATE-GUIDE.md)。程序默认从 `Thz-zZ/codex` 的 GitHub 正式版检查更新；发布脚本同时生成完整 ZIP 和 `update.json`。
+
+本机程序正在运行时，可用 `build-dev.ps1 -OutputDirectory build/update-dev` 在独立目录编译；对应打包命令为 `build-release.ps1 -BuildDirectory build/update-dev`。新目录也需要先构建或复制未变更的 `SessionBackend.exe`。
 
 ## 内容
 
