@@ -21,15 +21,34 @@ function updateRefreshTime(){
 }
 const adapterLabel=p=>{const type=p.adapter==='auto'?p.detectedAdapter:p.adapter;return (p.adapter==='auto'?'自动 · ':'')+(type==='sub2api'?'Sub2API':type==='newapi'?'NewAPI':'待识别');};
 const balanceText=b=>Number.isFinite(b?.value)?b.value.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4}):'—';
-let state={providers:[],history:[],config:{}},page='providers',detailId=null,detailEpoch=0,auto=true,nextRefresh=Date.now()+60000,allBusy=false,toastTimer,editorEpoch=0,siteFollowsBase=true,rangePeriod='today',rangeIsDefault=true,draggedId=null,reorderBusy=false,currentDetail=null,chartGranularity='auto',detectEpoch=0;
-const cache=new Map(),pending=new Set(),requests=new Map(),hiddenSeries=new Set();
+let state={providers:[],history:[],config:{}},page='providers',detailId=null,detailEpoch=0,auto=true,nextRefresh=Date.now()+60000,allBusy=false,toastTimer,editorEpoch=0,siteFollowsBase=true,rangePeriod='today',draggedId=null,reorderBusy=false,currentDetail=null,chartGranularity='auto',detectEpoch=0;
+const cache=new Map(),pending=new Set(),requests=new Map(),hiddenSeries=new Set(),detailViews=new Map();
+let detailViewSave=Promise.resolve();
+const detailCacheKey=(id,period,model='all')=>id+':'+period+(model==='all'?'':':model:'+model);
+function rememberDetailView(){
+  if(!detailId)return;
+  detailViews.set(detailId,{period:rangePeriod,model:$('modelFilter').value||'all',granularity:chartGranularity,hiddenSeries:[...hiddenSeries]});
+  if(window.relay.detailViewState)detailViewSave=call('detailViewState',Object.fromEntries(detailViews)).catch(error=>toast(error.message,true));
+}
+function syncModelFilter(models=[],selection=$('modelFilter').value||'all'){
+  const names=[...new Set([...models,...(selection==='all'?[]:[selection])])];
+  $('modelFilter').innerHTML='<option value="all">全部模型</option>'+names.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');$('modelFilter').value=selection;
+  filterPickers.get('modelFilter')?.sync();
+}
+function restoreDetailView(id){
+  const saved=detailViews.get(id);
+  rangePeriod=saved?.period||'today';try{RelayAdapters.range(rangePeriod);}catch{rangePeriod='today';}
+  chartGranularity=['auto','hour','day'].includes(saved?.granularity)?saved.granularity:'auto';
+  hiddenSeries.clear();for(const key of saved?.hiddenSeries||[])hiddenSeries.add(key);
+  syncRangeControls();syncModelFilter([],saved?.model||'all');
+}
 const detailStorageKey='relay-detail-cache-v1';
-function hydrateDetails(){try{for(const r of JSON.parse(localStorage.getItem(detailStorageKey)||'[]'))if(state.providers.some(p=>p.id===r.id&&p.revision===r.revision)&&['today','7'].includes(r.period)&&r.range?.end===RelayAdapters.range(r.period).end&&r.usage){const key=r.id+':'+r.period,previous=cache.get(key);if(!previous||Date.parse(r.at)>=Date.parse(previous.summary?.checkedAt||previous.checkedAt||previous.at))cache.set(key,r);}}catch{}}
+function hydrateDetails(){try{for(const r of JSON.parse(localStorage.getItem(detailStorageKey)||'[]'))if(state.providers.some(p=>p.id===r.id&&p.revision===r.revision)&&['today','7'].includes(r.period)&&r.range?.end===RelayAdapters.range(r.period).end&&r.usage){const key=detailCacheKey(r.id,r.period,r.model||'all'),previous=cache.get(key);if(!previous||Date.parse(r.at)>=Date.parse(previous.summary?.checkedAt||previous.checkedAt||previous.at))cache.set(key,r);}}catch{}}
 function persistDetails(){try{const values=[...cache.values()].filter(r=>['today','7'].includes(r.period)&&r.usage&&r.range?.end===RelayAdapters.range(r.period).end&&state.providers.some(p=>p.id===r.id&&p.revision===r.revision)).sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,6),saved=[];let size=0;for(const r of values){const length=JSON.stringify(r).length;if(length>512000||size+length>2000000)continue;saved.push(r);size+=length;}localStorage.setItem(detailStorageKey,JSON.stringify(saved));}catch{}}
 const rangeLabel=period=>({today:'今天',yesterday:'昨天','7':'最近 7 天','30':'最近 30 天',all:'全部记录 / 近 90 天'})[period]||(period.startsWith('range:')?period.slice(6).replace(':',' ～ '):period);
 const usageLabel=()=>rangePeriod==='today'?'今日':rangePeriod==='yesterday'?'昨日':'所选日期';
-function matchingCache(id,period=rangePeriod){const value=cache.get(id+':'+period);return value?.revision===state.providers.find(p=>p.id===id)?.revision&&value?.period===period&&value?.range?.end===RelayAdapters.range(period).end?value:null;}
-function defaultPeriod(id){const p=state.providers.find(p=>p.id===id);return (p?.adapter==='auto'?p.detectedAdapter:p?.adapter)==='sub2api'?'7':'today';}
+function matchingCache(id,period=rangePeriod,model='all'){const value=cache.get(detailCacheKey(id,period,model));return value?.revision===state.providers.find(p=>p.id===id)?.revision&&value?.period===period&&value?.range?.end===RelayAdapters.range(period).end?value:null;}
+function selectedCache(){return matchingCache(detailId,rangePeriod,$('modelFilter').value||'all');}
 const filterPickers=new Map();
 function enhanceFilter(id,icon){
   const source=$(id),root=$(id+'Picker'),menuId=id+'Menu',valueId=id+'Value';
@@ -81,12 +100,12 @@ function renderSelectedHeader(){
 function renderState(){
   $('providerCount').textContent=state.providers.length;
   const changed=!state.providers.some(p=>p.id===detailId);
-  if(changed){detailId=(state.providers.find(p=>p.active)||state.providers[0])?.id||null;detailEpoch++;}
-  if(changed||rangeIsDefault&&currentDetail?.revision!==state.providers.find(p=>p.id===detailId)?.revision){rangePeriod=defaultPeriod(detailId);rangeIsDefault=true;syncRangeControls();}
+  for(const id of detailViews.keys())if(!state.providers.some(p=>p.id===id))detailViews.delete(id);
+  if(changed){detailId=(state.providers.find(p=>p.active)||state.providers[0])?.id||null;detailEpoch++;restoreDetailView(detailId);}
   $('configPath').textContent=state.config.dir||'';$('dataPath').textContent=state.dataDir||'';
   syncStartupSettings();
   navigate(['settings','sessions'].includes(page)?page:detailId?'details':'providers');
-  if(page==='details'&&(changed||currentDetail?.revision!==state.providers.find(p=>p.id===detailId)?.revision))renderDetail(matchingCache(detailId)||null);
+  if(page==='details'&&(changed||currentDetail?.revision!==state.providers.find(p=>p.id===detailId)?.revision))renderDetail(selectedCache()||null);
 }
 function renderProviders(){
   if(draggedId)return;
@@ -142,12 +161,10 @@ function renderDetail(r,loading=false){
   chartHover?.hide();
   currentDetail=r;
   updateRefreshTime();
+  syncModelFilter(r?.usage?.modelNames||[]);
   if(!r){$('detailBody').innerHTML='<div class="empty-state"><div class="empty-icon">↻</div><h2>'+(loading?'正在查询余额与记录':'尚未查询余额与用量')+'</h2><p>'+(loading?'首次连接可能需要几秒钟。':'点击上方“刷新数据”，查看余额、缓存率与使用记录。')+'</p></div>';return;}
   const u=r.usage,summary=r.summary||r,b=r.balance||summary.balance,t=u?.totals||summary.totals,excluded=t?.excluded??t?.missing??0;
   const metric=(label,value,note,featured=false)=>`<div class="metric-card${featured?' featured':''}"><div class="metric-label">${esc(label)}</div><div class="metric-value">${value}</div><div class="metric-note" data-tooltip="${esc(note)}">${esc(note)}</div></div>`;
-  const models=u?.modelNames||[],selection=$('modelFilter').value;
-  $('modelFilter').innerHTML='<option value="all">全部模型</option>'+models.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');$('modelFilter').value=models.includes(selection)?selection:'all';
-  filterPickers.get('modelFilter')?.sync();
   let html=`<div class="metrics-grid">${metric(usageLabel()+'消费',balanceText({value:t?.cost})+(Number.isFinite(t?.cost)?'<small>USD</small>':''),Number.isFinite(t?.cost)?'当前 API 密钥 · 实际扣费':'接口未完整提供费用数据')}${metric('Token 缓存命中率',rate(t?.tokenRate),excluded?`${excluded} 条或组无效数据已排除`:'按输入 Token 用量加权')}${metric('缓存读取 Token',compact(t?.read),`总输入 ${compact(t?.input)}`)}${metric('请求数量',fmt(t?.requests),u?.mode==='summary'?'所选时间段汇总':`请求命中率 ${rate(t?.requestRate)}`)}</div>`;
   if(r.usageError)html+=`<div class="notice error">记录查询失败：${esc(r.usageError)}</div>`;
   html+=`<div class="detail-meta"><strong>用量分析 <small>${esc(rangeLabel(rangePeriod))}</small></strong></div>`;
@@ -162,22 +179,21 @@ function renderDetail(r,loading=false){
 }
 async function fetchProvider(id,period=rangePeriod,model='all'){
   const token=id+':'+period+':'+model;if(requests.has(token))return requests.get(token);pending.add(token);renderProviders();
-  const task=(async()=>{try{const result=await call('inspect',{id,period,model});const p=state.providers.find(p=>p.id===id);if(!p||p.revision!==result.revision)return null;if(p.adapter==='auto'&&result.adapter)p.detectedAdapter=result.adapter;const previous=matchingCache(id,period),cacheKey=id+':'+period;if(model==='all'){cache.set(cacheKey,result);persistDetails();}else if(previous)cache.set(cacheKey,{...previous,balance:result.balance,at:result.at});return result;}finally{pending.delete(token);requests.delete(token);renderProviders();}})();
+  const task=(async()=>{try{const result=await call('inspect',{id,period,model});const p=state.providers.find(p=>p.id===id);if(!p||p.revision!==result.revision)return null;if(p.adapter==='auto'&&result.adapter)p.detectedAdapter=result.adapter;const previous=matchingCache(id,period);cache.set(detailCacheKey(id,period,model),result);if(model!=='all'&&previous)cache.set(detailCacheKey(id,period),{...previous,balance:result.balance,at:result.at});persistDetails();return result;}finally{pending.delete(token);requests.delete(token);renderProviders();}})();
   requests.set(token,task);return task;
 }
 async function refreshAll(){
   if(allBusy)return;allBusy=true;let failures=0;const ids=state.providers.filter(p=>p.active).map(p=>p.id),requestedPeriod='today';
-  const worker=async()=>{while(ids.length){const id=ids.shift();try{await fetchProvider(id,requestedPeriod);if(page==='details'&&detailId===id&&state.providers.find(p=>p.id===id)?.active){if(rangeIsDefault&&defaultPeriod(id)==='7'&&rangePeriod==='today'){rangePeriod='7';syncRangeControls();}if(rangePeriod==='7')await fetchProvider(id,'7');}}catch{failures++;}}};
+  const worker=async()=>{while(ids.length){const id=ids.shift();try{await fetchProvider(id,requestedPeriod);if(page==='details'&&detailId===id&&state.providers.find(p=>p.id===id)?.active&&rangePeriod==='7')await fetchProvider(id,'7');}catch{failures++;}}};
   try{await Promise.all([worker(),worker()]);if(page==='details'&&['today','7'].includes(rangePeriod)&&$('modelFilter').value==='all'&&state.providers.find(p=>p.id===detailId)?.active)renderDetail(matchingCache(detailId)||currentDetail);if(failures)toast(`${failures} 个中转查询失败，请手动重试。`,true);}finally{allBusy=false;nextRefresh=Date.now()+60000;syncRefreshControls();}
 
 }
 async function openDetails(id){
   if(!state.providers.some(p=>p.id===id))return;
   const changed=detailId!==id;detailId=id;detailEpoch++;
-  if(changed){rangePeriod=defaultPeriod(id);rangeIsDefault=true;syncRangeControls();chartGranularity='auto';hiddenSeries.clear();}
-  $('modelFilter').innerHTML='<option value="all">全部模型</option>';filterPickers.get('modelFilter')?.sync();
+  if(changed)restoreDetailView(id);
   $('refreshDetail').disabled=[...pending].some(key=>key.startsWith(id+':'));navigate('details');
-  const saved=matchingCache(id);renderDetail(saved||null);
+  renderDetail(selectedCache()||null);
   syncRefreshControls();
 }
 function reportRefreshFailure(id,result){
@@ -187,8 +203,8 @@ function reportRefreshFailure(id,result){
   else if(!Number.isFinite(result.balance?.value))toast(`${name} 余额刷新失败：${result.balance?.message||'接口未返回账户余额。'}`,true);
 }
 async function refreshDetails(notifyFailure=true){
-  if(!detailId)return;const id=detailId,epoch=++detailEpoch,model=$('modelFilter').value;let period=$('period').value;$('refreshDetail').disabled=true;if(!currentDetail)renderDetail(null,true);
-  try{let result=await fetchProvider(id,period,model);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod&&rangeIsDefault&&period==='today'&&result.usage?.mode==='summary'){period=rangePeriod='7';syncRangeControls();result=await fetchProvider(id,period,model);}if(result&&notifyFailure)reportRefreshFailure(id,result);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod){renderSelectedHeader();renderDetail(result);}}catch(e){if(notifyFailure||epoch===detailEpoch)toast(`${state.providers.find(p=>p.id===id)?.name||'中转'} 刷新失败：${e.message}`,true);if(epoch===detailEpoch){const saved=matchingCache(id);if(saved)renderDetail(saved);else $('detailBody').innerHTML=`<div class="notice error">${esc(e.message)}</div>`;}}finally{if(epoch===detailEpoch)$('refreshDetail').disabled=false;nextRefresh=Date.now()+60000;}
+  if(!detailId)return;const id=detailId,epoch=++detailEpoch,model=$('modelFilter').value,period=$('period').value;$('refreshDetail').disabled=true;if(!currentDetail)renderDetail(null,true);
+  try{const result=await fetchProvider(id,period,model);if(result&&notifyFailure)reportRefreshFailure(id,result);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod){renderSelectedHeader();renderDetail(result);}}catch(e){if(notifyFailure||epoch===detailEpoch)toast(`${state.providers.find(p=>p.id===id)?.name||'中转'} 刷新失败：${e.message}`,true);if(epoch===detailEpoch){const saved=selectedCache();if(saved)renderDetail(saved);else $('detailBody').innerHTML=`<div class="notice error">${esc(e.message)}</div>`;}}finally{if(epoch===detailEpoch)$('refreshDetail').disabled=false;nextRefresh=Date.now()+60000;}
 }
 window.openDetails=openDetails;window.refreshDetails=refreshDetails;
 document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{detailEpoch++;navigate(b.dataset.nav);}));
@@ -218,13 +234,13 @@ async function handleProviderAction(e){
 $('providerList').addEventListener('click',handleProviderAction);
 $('detailActions').addEventListener('click',handleProviderAction);
 function syncRangeControls(){const source=$('period');source.querySelectorAll('[data-custom-range]').forEach(o=>o.remove());if(rangePeriod.startsWith('range:')){const option=new Option(rangeLabel(rangePeriod),rangePeriod);option.dataset.customRange='true';source.insertBefore(option,source.querySelector('[value=custom]'));}source.value=rangePeriod;filterPickers.get('period')?.sync();}
-async function applyRange(period){RelayAdapters.range(period);rangePeriod=period;rangeIsDefault=false;syncRangeControls();detailEpoch++;renderProviders();if(page==='details'){renderDetail(matchingCache(detailId)||null);await refreshDetails();}else await refreshAll();}
+async function applyRange(period){RelayAdapters.range(period);rangePeriod=period;syncRangeControls();rememberDetailView();detailEpoch++;renderProviders();if(page==='details'){renderDetail(selectedCache()||null);await refreshDetails();}else await refreshAll();}
 function cancelDateSelection(){$('dateDialog').close();syncRangeControls();}
 function onRangeChange(event){if(event.target.value==='custom'){const current=RelayAdapters.range(rangePeriod),today=RelayAdapters.day(Date.now()/1000);$('dateStart').max=$('dateEnd').max=today;$('dateStart').value=current.start;$('dateEnd').value=current.end;$('dateError').textContent='';$('dateDialog').showModal();}else applyRange(event.target.value).catch(e=>toast(e.message,true));}
 $('dateForm').addEventListener('submit',async event=>{event.preventDefault();try{const period='range:'+$('dateStart').value+':'+$('dateEnd').value;RelayAdapters.range(period);$('dateDialog').close();await applyRange(period);}catch(e){$('dateError').textContent=e.message;}});
 $('closeDate').onclick=$('cancelDate').onclick=cancelDateSelection;$('dateDialog').addEventListener('cancel',e=>{e.preventDefault();cancelDateSelection();});
 $('dateStart').addEventListener('change',()=>{if($('dateEnd').value<$('dateStart').value)$('dateEnd').value=$('dateStart').value;});
-$('detailBody').addEventListener('click',event=>{const series=event.target.closest('[data-series]'),grain=event.target.closest('[data-grain]');if(series){const key=series.dataset.series;if(hiddenSeries.has(key))hiddenSeries.delete(key);else hiddenSeries.add(key);renderCharts();}if(grain){chartGranularity=grain.dataset.grain;renderCharts();}});
+$('detailBody').addEventListener('click',event=>{const series=event.target.closest('[data-series]'),grain=event.target.closest('[data-grain]');if(series){const key=series.dataset.series;if(hiddenSeries.has(key))hiddenSeries.delete(key);else hiddenSeries.add(key);rememberDetailView();renderCharts();}if(grain){chartGranularity=grain.dataset.grain;rememberDetailView();renderCharts();}});
 let sortFeedbackTimer;
 function showSortFeedback(){clearTimeout(sortFeedbackTimer);$('sortFeedback').textContent='顺序已保存';$('sortFeedback').classList.add('visible');sortFeedbackTimer=setTimeout(()=>$('sortFeedback').classList.remove('visible'),1900);}
 async function persistOrder(ids){
@@ -263,7 +279,7 @@ for(const id of ['adapter','reasoning']){
 }
 const modelPicker=new RelayModelPicker({fetch:input=>call('listModels',input),getCredentials:()=>({baseUrl:$('baseUrl').value.trim(),key:$('apiKey').value.trim()}),isOpen:()=>$('providerDialog').open});
 $('chooseConfigDir').onclick=async()=>{try{setState(await call('chooseConfigDir'));}catch(e){toast(e.message,true);}};$('openDataDir').onclick=async()=>{try{await call('openDataDir');}catch(e){toast(e.message,true);}};
-$('refreshDetail').onclick=()=>refreshDetails();$('period').onchange=onRangeChange;$('modelFilter').onchange=()=>refreshDetails();
+$('refreshDetail').onclick=()=>refreshDetails();$('period').onchange=onRangeChange;$('modelFilter').onchange=()=>{rememberDetailView();refreshDetails();};
 const dateIcon='<svg class="filter-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4M17 3v4M3 10h18M8 14h2M14 14h2M8 17h2"/></svg>';
 enhanceFilter('period',dateIcon);
 enhanceFilter('modelFilter','<svg class="filter-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg>');
@@ -276,4 +292,4 @@ function syncRefreshControls(){
 }
 function updateCountdown(){const editing=syncRefreshControls();if(auto&&!editing&&Date.now()>=nextRefresh&&!pending.size&&!allBusy){nextRefresh=Date.now()+60000;if(page==='details'&&state.providers.find(p=>p.id===detailId)?.active&&rangePeriod==='today')refreshDetails(false);else refreshAll();}}
 setInterval(updateCountdown,1000);
-window.appReady=(async()=>{try{setState(await call('state'));window.relayUiReady=true;if(detailId){await openDetails(detailId);if(!currentDetail?.usage||!cacheFresh(currentDetail))await refreshDetails(false);}}catch(error){$('providerList').innerHTML=`<div class="notice error">${esc(error.message)}</div>`;toast(error.message,true);}})();
+window.appReady=(async()=>{try{if(window.relay.detailViewState)for(const [id,value] of Object.entries(await call('detailViewState')))detailViews.set(id,value);setState(await call('state'));window.relayUiReady=true;if(detailId){await openDetails(detailId);if(!currentDetail?.usage||!cacheFresh(currentDetail))await refreshDetails(false);}}catch(error){$('providerList').innerHTML=`<div class="notice error">${esc(error.message)}</div>`;toast(error.message,true);}})();

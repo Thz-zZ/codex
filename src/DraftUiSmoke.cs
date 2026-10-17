@@ -4,6 +4,23 @@ using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
 namespace RelayLite {
 internal static class DraftUiSmoke {
+    const string ViewSnapshot="({id:detailId,period:rangePeriod,model:$('modelFilter').value,granularity:chartGranularity,hiddenSeries:[...hiddenSeries],matchingData:currentDetail?.period===rangePeriod&&currentDetail?.model===$('modelFilter').value})";
+    static string trayView;
+    internal static async Task PrepareTrayView(CoreWebView2 core){
+        await core.ExecuteScriptAsync("window.detailViewTrayPrepared=null;(async()=>{await openDetails(state.providers.find(p=>p.active).id);await applyRange('7');$('modelFilter').value='gpt-codex';rememberDetailView();await refreshDetails(false);document.querySelector('[data-grain=day]')?.click();document.querySelector('[data-series=plain]').click();await detailViewSave;window.detailViewTrayPrepared=true;})().catch(error=>window.detailViewTrayPrepared=String(error));");
+        for(int n=0;n<200;n++){
+            string result=await core.ExecuteScriptAsync("window.detailViewTrayPrepared");
+            if(result=="true"){trayView=await core.ExecuteScriptAsync(ViewSnapshot);return;}
+            if(result!="null")throw J.Error("Preparing tray view: "+result);
+            await Task.Delay(50);
+        }
+        throw J.Error("Preparing tray view timed out.");
+    }
+    internal static async Task CheckTrayView(CoreWebView2 core,string dir){
+        string restored=await core.ExecuteScriptAsync(ViewSnapshot);
+        if(restored!=trayView||!J.True(J.Get(J.Decode(restored),"matchingData")))throw J.Error("Tray reopen lost the relay filters or matching cache: "+restored+"; expected "+trayView);
+        J.Atomic(Path.Combine(dir,"detail-view-result.json"),J.Encode(J.Map("ok",true,"perRelayFilters",true,"customDates",true,"modelCache",true,"trayRestore",true,"freshProcessDefaults",true)));
+    }
     public static async Task Run(CoreWebView2 core,string dir){
         await UpdateUiSmoke.Run(core,dir);
         await core.ExecuteScriptAsync(File.ReadAllText(Path.Combine(Program.BaseDir,"draft-editor-smoke.js")));
