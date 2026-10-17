@@ -1,0 +1,120 @@
+/* Integrated local session workspace, using the same palette as relay details. */
+main.sessions-layout{display:flex;flex-direction:column;overflow:hidden;scrollbar-gutter:auto}
+main.sessions-layout>header{flex-shrink:0}
+#sessionsPage{display:flex;flex-direction:column;flex:1;min-height:0}
+.session-overview,.session-searchbar,.session-status{flex-shrink:0}
+.session-overview{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:13px;padding:15px 18px;margin-bottom:14px}
+.session-counts{display:flex;align-items:baseline;gap:7px;color:#6c7f99;font-size:12px}
+.session-counts strong{font-size:23px;line-height:1.2;color:#2d415e;font-variant-numeric:tabular-nums;margin-right:1px}
+.session-counts>span{margin-left:11px;font-size:11px;color:#8b9ab0}
+.session-data-actions{margin-left:auto;display:flex;align-items:center;gap:6px}
+.session-data-actions .button{min-height:30px;padding:4px 9px;font-size:11px}
+.session-home{flex:0 0 100%;font:10px/1.5 Consolas,"Microsoft YaHei",sans-serif;color:#8b9bb0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.session-readonly-tag{background:#eff4fa;border-radius:5px;padding:2px 6px}
+.session-searchbar{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.session-search{display:flex;align-items:center;gap:9px;flex:1;min-width:0;border:1px solid #dfe6ef;background:#fff;border-radius:9px;padding:0 12px;color:#92a1b5}
+.session-search:focus-within{border-color:#b5c7de;box-shadow:0 0 0 3px #b5c7de15}
+.session-search input{height:39px;min-width:0;width:100%;border:0;outline:0;background:transparent;font-size:12px;color:#425c7c}
+.session-search input:focus-visible{outline:none}
+.session-search input::placeholder{color:#95a3b7}
+.session-filters{display:flex;gap:3px;border:1px solid #e0e7f0;padding:3px;background:#f0f4f9;border-radius:9px;flex-shrink:0}
+.session-filters button{border:0;background:transparent;color:#8698af;padding:6px 11px;font-size:11px;border-radius:6px;white-space:nowrap}
+.session-filters button[aria-pressed=true]{color:#4f6b90;background:#fff;box-shadow:0 1px 4px #26364b0a}
+.session-workspace{display:grid;grid-template-columns:minmax(275px,.9fr) minmax(300px,1.1fr);gap:14px;flex:1;min-height:0}
+.session-list-panel,.session-preview-panel{background:#fff;border:1px solid var(--line);border-radius:13px;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.session-selection{display:flex;align-items:center;gap:7px;min-height:51px;padding:10px 12px;border-bottom:1px solid #edf1f6;flex-shrink:0}
+.session-selection label{display:flex;align-items:center;gap:5px;color:#7488a2;font-size:10px;white-space:nowrap;cursor:pointer}
+.session-selection input,.session-row>input,.session-preview-tools input,.session-ack input,.session-readonly input{accent-color:#839dbf;width:13px;height:13px;cursor:pointer;flex-shrink:0}
+#sessionSelectionCount{font-size:10px;color:#98a6b9;white-space:nowrap;margin-right:auto}
+.session-selection .button{padding:4px 8px;font-size:10px;min-height:28px}
+.session-danger{color:#b96a61!important;border-color:#ecd9d5!important;background:#fff!important}
+.session-danger:hover:not(:disabled){background:#fff4f0!important;border-color:#debbb2!important}
+.session-list{overflow:auto;min-height:0;flex:1;scrollbar-width:thin;scrollbar-color:#ccd7e5 transparent;overscroll-behavior:contain;padding:4px 5px}
+.session-row{display:flex;align-items:flex-start;gap:8px;border:1px solid transparent;border-radius:8px;margin:2px 0;padding:9px 7px 9px 8px;transition:background .15s,border-color .15s}
+.session-row:hover{background:#f6f9fd}
+.session-row.is-current{background:#f1f6fc;border-color:#d8e3f1}
+.session-row>input{margin:5px 0 0}
+.session-open{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;text-align:left;padding:0;border:0;background:transparent;color:#435a78}
+.session-open strong{font-size:12px;font-weight:550;line-height:1.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.session-row-project{font-size:10px;color:#8b9db3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.7}
+.session-row-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:9px;color:#9aa8ba;line-height:1.8}
+.session-row-badge{color:#8096b0;background:#edf2f8;border-radius:4px;padding:0 4px;font-size:8px}
+.session-row-badge.missing{color:#b88471;background:#fff4ee}
+.session-child{color:#9badc3}
+.session-list-footer{display:flex;align-items:center;justify-content:space-between;padding:8px 13px;min-height:35px;flex-shrink:0;border-top:1px solid #edf1f6;color:#97a6bb;font-size:10px}
+.session-list-footer .button{min-height:22px;padding:1px 4px;font-size:10px}
+.session-empty{padding:40px 18px;text-align:center;font-size:12px;color:#95a5ba;line-height:1.9}
+.session-preview-heading{display:flex;align-items:flex-start;gap:10px;justify-content:space-between;padding:18px 18px 12px;min-height:95px;flex-shrink:0}
+.session-preview-heading>div{min-width:0;flex:1}
+.session-preview-heading h2{font-size:14px;line-height:1.6;font-weight:600;color:#3d5573;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.session-preview-heading p{font-size:10px;line-height:1.8;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:6px}
+.session-preview-heading code{display:block;font-size:9px;color:#a2afc0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
+.session-preview-heading>.button{font-size:10px;padding:4px 7px;min-height:29px;flex-shrink:0;margin-top:1px}
+.session-preview-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 17px;border-top:1px solid #f0f3f8;border-bottom:1px solid #edf1f6;background:#fcfdff;color:#879bb5;font-size:10px;flex-shrink:0}
+.session-preview-tools label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.session-messages{flex:1;min-height:0;overflow:auto;padding:17px 17px 4px;scrollbar-width:thin;scrollbar-color:#ccd7e5 transparent;overscroll-behavior:contain}
+.session-preview-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;gap:9px;height:100%;min-height:160px;color:#99aac0;padding-bottom:28px}
+.session-preview-empty>span{font-size:35px;line-height:1.5;color:#c4d0e0}
+.session-preview-empty strong{font-size:12px;font-weight:500}
+.session-preview-empty p{font-size:11px;color:#a5b2c4;margin:0}
+.session-message{border:1px solid #e5ebf3;background:#fff;border-radius:10px;padding:12px 13px;margin-bottom:13px;box-shadow:0 1px 3px #26364b02}
+.session-message.user{background:#f3f7fc;border-color:#e1eaf5}
+.session-message-heading,.session-message>summary{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:10px;font-weight:600;color:#7892b3;margin-bottom:8px}
+.session-message.assistant .session-message-heading{color:#b57c5f}
+.session-message time{font-size:9px;color:#9cacc0;font-weight:400}
+.session-message pre{font:11px/1.9 "Segoe UI","Microsoft YaHei",sans-serif;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:#516a8b;user-select:text}
+.session-message.tool{padding:0;background:#fafcfe;box-shadow:none}
+.session-message.tool>summary{padding:10px 12px;cursor:pointer;margin:0;font-weight:400;list-style:none}
+.session-message.tool>summary::before{content:"›";color:#91a4bd}
+.session-message.tool[open]>summary::before{transform:rotate(90deg)}
+.session-message.tool>summary>span{flex:1}
+.session-message.tool pre{padding:0 12px 12px;font:10px/1.8 Consolas,"Microsoft YaHei",sans-serif;max-height:300px;overflow:auto}
+.session-preview-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 16px;min-height:39px;border-top:1px solid #edf1f6;flex-shrink:0}
+.session-preview-footer>span{font-size:9px;line-height:1.7;color:#9aacbf;overflow-wrap:anywhere}
+.session-preview-footer .button{font-size:10px;min-height:28px;padding:4px 9px;flex-shrink:0}
+.session-status{display:flex;align-items:baseline;justify-content:space-between;gap:15px;padding:12px 2px 0;color:#92a3ba;font-size:10px;line-height:1.8}
+.session-status>span:first-child{min-width:0;overflow-wrap:anywhere}
+.session-status .error{color:#b76e5f}
+.session-write-hint{font-size:9px;color:#a6b1c1;text-align:right;flex-shrink:0}
+#sessionImport,#sessionRefresh{display:flex;align-items:center;gap:7px}
+.session-dialog{width:650px}
+.session-dialog .dialog-body{max-height:60vh}
+.session-path-input{display:flex;align-items:center;gap:9px}
+.session-path-input input{flex:1;min-width:0;width:0}
+.session-path-input .button{height:39px;padding:7px 14px}
+.dialog-body .session-readonly{flex-direction:row;gap:10px;align-items:flex-start;margin-bottom:4px;padding:13px;background:#f6f9fd;border:1px solid #e5ebf4;border-radius:8px;cursor:pointer}
+.session-readonly input{margin-top:4px;min-height:0;height:13px!important;padding:0!important}
+.session-readonly>span{display:grid;gap:5px}
+.session-plan-note{color:#7c8fa8;font-size:12px;line-height:1.9;white-space:pre-line;margin:0 0 16px}
+.session-plan-list{max-height:300px;overflow:auto;border:1px solid #e5ebf3;border-radius:9px;scrollbar-width:thin;scrollbar-color:#ccd7e5 transparent}
+.session-plan-list>div{padding:12px 14px;border-bottom:1px solid #edf1f6}
+.session-plan-list>div:last-child{border-bottom:0}
+.session-plan-list strong{font-size:11px;font-weight:500;color:#5b7291;overflow-wrap:anywhere}
+.session-plan-list code{display:block;font-size:10px;color:#99abc0;margin:4px 0 0;overflow-wrap:anywhere}
+.session-plan-tag{font-size:9px;color:#a88670;background:#fff5ef;border-radius:4px;padding:1px 5px;margin-right:8px;white-space:nowrap}
+.dialog-body .session-ack{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:11px;color:#a46d5d;margin:18px 0 0;cursor:pointer}
+.session-ack input{height:13px;min-width:13px;padding:0}
+.button.session-danger-primary{background:#bd6554;border-color:#bd6554;color:#fff}
+.button.session-danger-primary:hover:not(:disabled){background:#ac5747;border-color:#ac5747}
+.session-info-text{font:12px/1.9 "Segoe UI","Microsoft YaHei",sans-serif;color:#7489a5;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;user-select:text}
+@media(max-width:1110px){
+  .session-workspace{grid-template-columns:minmax(260px,.9fr) minmax(280px,1.1fr);gap:11px}
+  .session-selection{gap:5px;padding:9px}.session-selection .button{padding:4px 6px}
+  .session-preview-heading{padding:15px 14px 11px}.session-messages{padding:14px 13px 3px}
+  .session-counts>span{margin-left:5px}.session-write-hint{display:none}
+}
+@media(max-width:980px){
+  .session-workspace{grid-template-columns:minmax(250px,.9fr) minmax(265px,1.1fr)}
+  .session-row-meta{font-size:8px}.session-preview-heading>.button{padding:3px 5px;font-size:9px}
+  .session-data-actions{gap:2px}.session-data-actions .button{font-size:10px;padding:3px 6px}
+  .session-counts{font-size:11px}.session-counts>span{font-size:10px;margin-left:3px}
+}
+@media(max-height:720px){
+  .session-overview{padding:12px 15px;margin-bottom:12px;gap:10px}
+  .session-searchbar{margin-bottom:12px}
+  .session-dialog[open]{max-height:calc(100vh - 36px);display:flex;flex-direction:column;overflow:hidden}
+  .session-dialog .dialog-body{min-height:0;max-height:none;overflow:auto}
+  .session-dialog .dialog-header,.session-dialog .dialog-footer{flex-shrink:0}
+  #sessionSettingsForm{display:flex;flex-direction:column;max-height:calc(100vh - 38px)}
+}
+@media(prefers-reduced-motion:reduce){.session-row{transition:none}}

@@ -1,0 +1,27 @@
+# Build outputs, packaged applications and generated test data
+build/
+bin/
+obj/
+dist/
+release/
+releases/
+
+# Python bytecode, test caches and local virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+
+# Local IDE and operating system files
+.vs/
+*.suo
+*.user
+Thumbs.db
+.DS_Store

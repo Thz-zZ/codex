@@ -1,0 +1,30 @@
+.provider-list{position:relative}
+.drag-handle{width:22px;flex-basis:22px;transition:background .15s,color .15s,transform .15s}
+.drag-handle:hover{transform:scale(1.08);background:#fff0e5;color:#ce784e}
+.sorting-providers,.sorting-providers *{cursor:grabbing!important;user-select:none!important}
+.provider-card.sort-placeholder,.provider-card.active.sort-placeholder{border:1px dashed #e9c4af;background:#f9f1ea;box-shadow:inset 0 0 0 4px #fbf6f2;outline:0}
+.sort-placeholder>*{visibility:hidden}
+.provider-card.sort-ghost{position:fixed;z-index:30;pointer-events:none;margin:0;opacity:1;border-color:#edac89;background:#fffdfa;box-shadow:0 18px 42px #25364a22,0 3px 10px #25364a0a;transform:scale(1.012) rotate(.25deg);will-change:translate,transform;contain:layout paint}
+.sort-ghost .drag-handle{color:#d58054;background:#fff0e5}
+.sort-active .provider-card:not(.sort-placeholder){will-change:transform}
+.sort-feedback{display:inline-block;margin-left:11px;font-size:10px;font-weight:400;color:#45a18b;opacity:0;transform:translateY(3px);transition:opacity .18s,transform .18s;vertical-align:1px}
+.sort-feedback.visible{opacity:1;transform:translateY(0)}
+.chart-hover-panel{position:fixed;z-index:25;pointer-events:none;width:248px;padding:13px 15px;border:1px solid #ffffff14;border-radius:10px;background:#26303bf5;color:#f5f7fa;box-shadow:0 10px 32px #17233228;font:11px/1.5 "Segoe UI","Microsoft YaHei",sans-serif;visibility:hidden}
+.chart-hover-panel.visible{visibility:visible}
+.chart-hover-date{font-size:12px;font-weight:650;margin:0 0 9px;padding-bottom:9px;border-bottom:1px solid #ffffff1c;color:#fff}
+.chart-hover-row{display:flex;justify-content:space-between;align-items:center;gap:15px;margin:5px 0;white-space:nowrap}
+.chart-hover-label{display:flex;align-items:center;gap:7px;color:#d0d6df}
+.chart-hover-dot{display:inline-block;flex:0 0 7px;height:7px;width:7px;border-radius:50%;background:var(--series-color,#9aa7b9)}
+.chart-hover-number{font-variant-numeric:tabular-nums;font-weight:550;color:#fff}
+.chart-hover-cost{border-top:1px solid #ffffff1c;padding-top:8px;margin-top:9px}
+.chart-hover-unavailable{color:#a5b0bd;font-weight:400}
+.trend-svg{touch-action:pan-y}
+.trend-hit-area{fill:transparent;pointer-events:all;outline:none}
+.trend-guide{stroke:#a7b5c8;stroke-width:1;stroke-dasharray:3 4;pointer-events:none;visibility:hidden}
+.trend-guide.visible{visibility:visible}
+.trend-point{pointer-events:none}
+.trend-point.is-hovered{r:4;stroke-width:2.5}
+.donut-segment{cursor:default}
+.relay-tooltip{position:fixed;inset:auto;margin:0;max-width:min(360px,calc(100vw - 20px));border:1px solid #ffffff1c;border-radius:7px;background:#293440f7;padding:8px 11px;color:#f5f7fb;box-shadow:0 5px 18px #1b2c4026;font:11px/1.6 "Segoe UI","Microsoft YaHei",sans-serif;white-space:pre-line;overflow-wrap:anywhere;pointer-events:none}
+.relay-tooltip::backdrop{background:transparent;pointer-events:none}
+@media(prefers-reduced-motion:reduce){.drag-handle,.sort-feedback{transition:none}.drag-handle:hover{transform:none}.provider-card.sort-ghost{transform:none}}

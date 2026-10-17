@@ -1,0 +1,62 @@
+(async()=>{
+  const check=(value,label)=>{if(!value)throw Error(label);};
+  const waitFor=async(fn,label)=>{for(let n=0;n<900;n++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,50));}throw Error(label+': '+$('sessionStatus').textContent);};
+  const api=(action,args={})=>call('sessions',{action,args});
+  const ready=()=>!$('sessionsPage').matches('[aria-busy=true]');
+  check(document.querySelectorAll('.metric-card').length===4,'four usage metrics');
+  check(!document.querySelector('.filter-heading'),'redundant filter heading removed');
+  const toolbar=document.querySelector('.detail-toolbar').getBoundingClientRect();
+  check($('periodPicker').getBoundingClientRect().left-toolbar.left<25,'date filter aligned left');
+  const active=state.providers.find(p=>p.active).id,other=state.providers.find(p=>!p.active).id;
+  await openDetails(other);
+  check(document.querySelector('.provider-card.is-viewing').dataset.id===other,'viewing outline follows chosen provider');
+  check(document.querySelector('.provider-card.active').dataset.id===active,'applied provider unchanged');
+  check(getComputedStyle(document.querySelector('.provider-card.is-viewing')).borderTopColor!==getComputedStyle(document.querySelector('.provider-card.active')).borderTopColor,'viewing and applied borders distinct');
+  navigate('sessions');
+  await waitFor(()=>ready()&&document.querySelectorAll('.session-row').length===4,'native inventory loaded');
+  check($('sessionCounts').textContent.includes('4'),'counts render');
+  document.querySelector('[data-session-filter=archived]').click();
+  check(document.querySelectorAll('.session-row').length===1,'archived filter');
+  document.querySelector('[data-session-filter=all]').click();
+  $('sessionSearch').value='界面布局';$('sessionSearch').dispatchEvent(new Event('input'));
+  check(document.querySelectorAll('.session-row').length===1,'title search');
+  $('sessionSelectAll').click();check($('sessionSelectionCount').textContent==='已选 1'&&!$('sessionExport').disabled,'filtered selection for export');
+  document.querySelector('.session-open').click();
+  await waitFor(()=>$('sessionMessages').querySelectorAll('.session-message').length>0&&!$('sessionPreviewNote').textContent.includes('载入'),'preview loaded');
+  const firstCount=$('sessionMessages').querySelectorAll('.session-message').length;
+  check(!$('sessionMoreMessages').classList.contains('hidden'),'pagination available');
+  $('sessionMoreMessages').click();
+  await waitFor(()=>$('sessionMessages').querySelectorAll('.session-message').length>firstCount,'next page appended');
+  $('sessionShowTools').click();
+  await waitFor(()=>document.querySelector('.session-message.tool'),'tool details rendered');
+  check(!document.querySelector('.session-message.tool').open,'tool details initially collapsed');
+  await waitFor(()=>!$('sessionSettings').disabled,'preview completed');
+  window.sessionSmokeStage='workspace';
+  await new Promise(resolve=>{window.sessionSmokeContinue=resolve;});
+  // Exercise confirmation UI without sending any native delete or import.
+  const original=window.relay;let canceled=false;
+  window.relay={...original,sessions:async input=>{
+    if(input.action==='prepareDelete')return {ok:true,data:{token:'synthetic-plan',selected:1,affected:2,sessions:[{id:'synthetic-parent',title:'已选父会话',selected:true},{id:'synthetic-child',title:'派生子会话',selected:false}]}};
+    if(input.action==='cancelPlan'){canceled=true;return {ok:true,data:true};}
+    return original.sessions(input);
+  }};
+  $('sessionDeleteSelected').click();
+  await waitFor(()=>$('sessionPlanDialog').open,'delete scope dialog');
+  check($('sessionPlanConfirm').disabled&&$('sessionPlanList').children.length===2,'full scope requires confirmation');
+  $('sessionPlanAck').click();check(!$('sessionPlanConfirm').disabled,'acknowledgment enables confirmation');
+  window.sessionSmokeStage='plan';
+  await new Promise(resolve=>{window.sessionSmokeContinue=resolve;});
+  $('sessionPlanCancel').click();await waitFor(()=>canceled,'cancel invalidates plan');window.relay=original;
+  await api('configure',{home:'',executable:'',readOnly:true});await RelaySessions.refresh();
+  check($('sessionImport').disabled&&$('sessionDeleteSelected').disabled,'read-only UI protects writes');
+  let guarded=false;try{await api('prepareDelete',{ids:['synthetic-parent']});}catch(error){guarded=error.message.includes('只读');}
+  check(guarded,'native read-only enforcement');
+  await api('configure',{home:'',executable:'',readOnly:false});await RelaySessions.refresh();
+  $('sessionSettings').click();await waitFor(()=>$('sessionSettingsDialog').open,'settings dialog');
+  window.sessionSmokeStage='settings';
+  await new Promise(resolve=>{window.sessionSmokeContinue=resolve;});
+  $('sessionSettingsDialog').close();
+  $('sessionSearch').value='界面布局';$('sessionSearch').dispatchEvent(new Event('input'));document.querySelector('.session-open').click();
+  await waitFor(()=>document.querySelector('.session-message.tool'),'restore session preview');
+  window.sessionSmokeResult={ok:true,inventory:4,previewPagination:true,tools:true,deleteScope:true,readOnly:true,viewingBorder:true,metrics:4};
+})().catch(error=>window.sessionSmokeResult={ok:false,error:error.message,stack:error.stack});

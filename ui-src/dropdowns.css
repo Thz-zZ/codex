@@ -1,0 +1,65 @@
+/* Shared dropdown appearance for model, relay type, effort and usage filters. */
+:is(.filter-menu,.model-menu){
+  top:calc(100% + 6px);
+  padding:6px;
+  border:1px solid #e1e6ef;
+  border-radius:10px;
+  background:#fff;
+  box-shadow:0 10px 28px #26375216,0 2px 6px #26375208;
+  max-height:248px;
+  overflow:auto;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+  scrollbar-color:#ccd3df transparent;
+  animation:relay-dropdown-enter .12s ease-out;
+}
+:is(.filter-menu,.model-menu)::-webkit-scrollbar{width:6px;height:6px}
+:is(.filter-menu,.model-menu)::-webkit-scrollbar-track{background:transparent}
+:is(.filter-menu,.model-menu)::-webkit-scrollbar-thumb{border-radius:6px;background:#ccd3df}
+:is(.filter-menu,.model-menu)::-webkit-scrollbar-button{display:none}
+.filter-option,.model-menu>button{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  min-height:36px;
+  padding:8px 10px;
+  border:0;
+  border-radius:6px;
+  color:#59677d;
+  background:transparent;
+  font:400 11px/1.6 "Segoe UI","Microsoft YaHei",sans-serif;
+  text-align:left;
+}
+.filter-option:hover,.filter-option.is-focused,.model-menu>button:hover,.model-menu>button.focused{color:#c45f32;background:#fff6ee}
+.filter-option.is-selected,.model-menu>button[aria-selected=true]{color:#dc6737;background:#fff0e5;font-weight:600}
+.model-option-label{min-width:0;overflow-wrap:anywhere}
+.dropdown-check,.filter-check{display:flex;flex:0 0 15px;align-items:center;justify-content:center;visibility:hidden;color:#dc6737}
+.model-menu>button[aria-selected=true] .dropdown-check,.filter-option.is-selected .filter-check{visibility:visible}
+.model-menu-note{margin:4px 0;padding:7px 10px;border-top:1px solid #f0f2f6;line-height:1.7}
+#providerDialog .editor-select{width:100%;min-width:0}
+#providerDialog .editor-select.is-open{z-index:30}
+#providerDialog .editor-select .filter-trigger,#providerDialog .model-picker input{
+  height:40px;
+  border:1px solid #dfe3ea;
+  border-radius:8px;
+  background:white;
+  color:#455361;
+  font-size:12px;
+}
+#providerDialog .editor-select .filter-trigger{padding:0 11px}
+#providerDialog .editor-select .filter-menu{left:0;right:0;min-width:0;width:100%;z-index:40}
+#providerDialog .editor-select .filter-value{font-size:12px}
+#providerDialog .editor-select.is-open .filter-trigger,#providerDialog .model-picker:has(input[aria-expanded=true]) input{border-color:#ecad90;box-shadow:0 0 0 3px #ed703f0d;outline:none}
+#providerDialog .model-picker:has(input[aria-expanded=true]){z-index:40}
+#providerDialog .model-toggle{display:grid;place-items:center;top:1px;right:1px;width:33px;height:38px;border-radius:0 7px 7px 0;color:#9ca5b3;font-size:12px}
+#providerDialog .model-toggle svg{transition:transform .15s}
+#providerDialog input[aria-expanded=true]+.model-toggle svg{transform:rotate(180deg)}
+#providerDialog .account-content{padding:0 14px}
+#providerDialog .account-content>.checkbox{margin-bottom:0}
+#providerDialog .connection-test-footer{min-height:61px;padding:14px 0;margin-top:14px;gap:12px;align-items:center}
+#providerDialog .connection-test-footer>.button{height:32px;padding:0 12px;display:flex;align-items:center;justify-content:center}
+#providerDialog .connection-test-footer .connection-results{line-height:1.7}
+#providerDialog .notes-field{margin-top:20px}
+@keyframes relay-dropdown-enter{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){:is(.filter-menu,.model-menu){animation:none}#providerDialog .model-toggle svg{transition:none}}
