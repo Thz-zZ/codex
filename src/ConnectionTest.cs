@@ -24,15 +24,15 @@ internal static class ConnectionTest {
         }catch(Exception e){string message=explain(e,"apiKey"),text=Usage.ErrorText(e);bool unsupported=text.Contains("HTTP 404")||text.Contains("HTTP 405");checks.Add(row(text.Contains("HTTP 401")?"apiKey":"baseUrl","API 地址与密钥",unsupported?"warning":"error",unsupported?"该站点未开放模型列表接口，无法通过此接口验证模型调用权限。":message));}
         if(!J.True(J.Get(input,"includeAccount")))return J.Map("checks",checks);
         try{site=J.Str(input,"siteUrl").Trim();site=site==""?baseUrl:Store.BaseUrl(site);}catch(Exception e){checks.Add(row("siteUrl","统计网站地址","error",Usage.ErrorText(e)));return J.Map("checks",checks);}
-        string choice=J.Str(input,"adapter","auto"),detected=null;var reasons=new List<string>();
+        string choice=J.Str(input,"adapter","auto"),detected=null;var reasons=new List<string>();bool stopped=false;
         if(choice!="auto"&&choice!="newapi"&&choice!="sub2api"){checks.Add(row("adapter","接口类型","error","请选择自动识别、NewAPI 或 Sub2API。"));return J.Map("checks",checks);}
         foreach(var type in choice=="auto"?new[]{"newapi","sub2api"}:new[]{choice}){
             try{
                 var payload=await Usage.GetForTest(site+(type=="newapi"?"/api/log/token":"/v1/usage"),key);
                 if(!Usage.ValidTestPayload(type,payload))throw J.Error("接口返回格式与 "+type+" 不符。");detected=type;break;
-            }catch(Exception e){reasons.Add((type=="newapi"?"NewAPI：":"Sub2API：")+explain(e,"apiKey"));}
+            }catch(Exception e){reasons.Add((type=="newapi"?"NewAPI：":"Sub2API：")+explain(e,"apiKey"));if(!Usage.CanProbeAnotherAdapter(e)){stopped=true;break;}}
         }
-        if(detected==null&&choice!="sub2api")try{if(Usage.ValidTokenPayload(await Usage.GetForTest(site+"/api/usage/token",key)))detected="newapi";}catch{}
+        if(detected==null&&!stopped&&choice!="sub2api")try{if(Usage.ValidTokenPayload(await Usage.GetForTest(site+"/api/usage/token",key)))detected="newapi";}catch(Exception e){reasons.Add(explain(e,"apiKey"));}
         checks.Add(row("siteUrl","统计接口",detected==null?"error":"success",detected==null?string.Join("；",reasons):"已连接 "+(detected=="newapi"?"NewAPI":"Sub2API")+"，统计密钥验证通过。"));
         if(account!=""&&account.Length<=16384&&account.IndexOfAny(new[]{'\r','\n'})<0){
             account=account.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase)?account.Substring(7).Trim():account;

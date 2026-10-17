@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Authentication;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -17,9 +18,31 @@ internal static class Usage {
         // The standalone compiler does not supply modern framework TLS defaults.
         // Keep certificate validation enabled and use the protocol supported by both relay backends.
         ServicePointManager.SecurityProtocol=SecurityProtocolType.Tls12;
-        return new HttpClient(new HttpClientHandler { AllowAutoRedirect=false }) { Timeout=TimeSpan.FromSeconds(12) };
+        return new HttpClient(new HttpClientHandler { AllowAutoRedirect=false }) { Timeout=Timeout.InfiniteTimeSpan };
     }
     internal static Func<string,string,string,Task<object>> FetchOverride;
+    internal sealed class HttpFailure : Exception {
+        internal readonly int Status;
+        internal HttpFailure(int status,string message):base("HTTP "+status+"："+message){Status=status;}
+    }
+    internal static bool TransportFailure(Exception error){
+        for(var current=error;current!=null;current=current.InnerException)
+            if(current is HttpRequestException||current is WebException||current is IOException||current is OperationCanceledException||current is AuthenticationException)return true;
+        return false;
+    }
+    internal static bool CanProbeAnotherAdapter(Exception error){
+        if(TransportFailure(error))return false;
+        var http=error as HttpFailure;return http==null||http.Status==200||http.Status==404||http.Status==405;
+    }
+    static bool RetryConnection(Exception error){
+        if(!TransportFailure(error))return false;
+        for(var current=error;current!=null;current=current.InnerException){
+            var web=current as WebException;
+            if(current is OperationCanceledException||web!=null&&(web.Status==WebExceptionStatus.Timeout||web.Status==WebExceptionStatus.TrustFailure))return false;
+            if(current is AuthenticationException&&!(current.InnerException is IOException))return false;
+        }
+        return true;
+    }
     static string Root(object p) { return J.Str(p,"siteUrl",J.Str(p,"baseUrl")).TrimEnd('/'); }
     internal static object Unwrap(object value) { var data=J.Get(value,"data");return data is Dictionary<string,object>?data:value; }
     static string Day(DateTime now) { return now.ToUniversalTime().AddHours(8).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture); }
@@ -40,32 +63,42 @@ internal static class Usage {
         return root+"/v1/usage?start_date="+J.Str(range,"start")+"&end_date="+J.Str(range,"end")+"&days="+J.Str(range,"days")+"&timezone=Asia%2FShanghai";
     }
     static async Task<object> Get(string url,string key,string userId="") {
-        if(FetchOverride!=null)return await FetchOverride(url,key,userId);
-        using(var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(12)))
+        // Retry an interrupted GET once, sharing the original deadline across both attempts.
+        using(var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(12))){
+            for(int attempt=0;;attempt++)try{return await GetOnce(url,key,userId,timeout.Token).ConfigureAwait(false);}
+            catch(Exception ex) when(attempt==0&&!timeout.IsCancellationRequested&&RetryConnection(ex)){
+                await Task.Delay(200,timeout.Token).ConfigureAwait(false);
+            }
+            catch(Exception ex) when(timeout.IsCancellationRequested){throw new OperationCanceledException("请求超时。",ex,timeout.Token);}
+        }
+    }
+    static async Task<object> GetOnce(string url,string key,string userId,CancellationToken cancellation) {
+        if(FetchOverride!=null)return await FetchOverride(url,key,userId).ConfigureAwait(false);
         using(var request=new HttpRequestMessage(HttpMethod.Get,url)) {
             request.Headers.TryAddWithoutValidation("Accept","application/json");
             if(key!="")request.Headers.TryAddWithoutValidation("Authorization","Bearer "+key);
             if(userId!="")request.Headers.TryAddWithoutValidation("New-Api-User",userId);
-            using(var response=await Http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,timeout.Token)) {
-                using(var stream=await response.Content.ReadAsStreamAsync())
+            using(var response=await Http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,cancellation).ConfigureAwait(false))
+            using(cancellation.Register(()=>response.Dispose())) {
+                using(var stream=await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                 using(var buffer=new MemoryStream()) {
                     byte[] block=new byte[16384];int read;
-                    while((read=await stream.ReadAsync(block,0,block.Length,timeout.Token))>0) {
+                    while((read=await stream.ReadAsync(block,0,block.Length,cancellation).ConfigureAwait(false))>0) {
                         if(buffer.Length+read>8*1024*1024)throw J.Error("接口返回数据过大。");
                         buffer.Write(block,0,read);
                     }
-                    object data;try{data=J.Decode(Encoding.UTF8.GetString(buffer.ToArray()));}catch{throw J.Error("站点没有返回 JSON 接口。");}
+                    object data;try{data=J.Decode(Encoding.UTF8.GetString(buffer.GetBuffer(),0,(int)buffer.Length));}catch{if(!response.IsSuccessStatusCode)throw new HttpFailure((int)response.StatusCode,"站点没有返回 JSON 接口。");throw J.Error("站点没有返回 JSON 接口。");}
                     var code=J.Get(data,"code");bool codeOK=code==null||code is bool&&(bool)code||new[]{"0","200"}.Contains(J.S(code));
-                    if(!response.IsSuccessStatusCode||J.Get(data,"success") is bool&&!J.True(J.Get(data,"success"))||!codeOK)throw J.Error("HTTP "+(int)response.StatusCode+"："+J.Str(data,"message",J.Str(J.Get(data,"error"),"message","查询失败")));
+                    if(!response.IsSuccessStatusCode||J.Get(data,"success") is bool&&!J.True(J.Get(data,"success"))||!codeOK)throw new HttpFailure((int)response.StatusCode,J.Str(data,"message",J.Str(J.Get(data,"error"),"message","查询失败")));
                     return data;
                 }
             }
         }
     }
-    static List<object> Unpack(object payload) {
+    static IEnumerable<Dictionary<string,object>> Unpack(object payload) {
         object list=J.Get(payload,"data");if(!(list is System.Collections.IList))list=J.Get(list,"items");
         if(!J.True(J.Get(payload,"success"))||!(list is System.Collections.IList))throw J.Error("接口返回格式不同：未找到日志数组");
-        return J.Arr(list).Where(x=>x is Dictionary<string,object>).ToList();
+        return ((System.Collections.IList)list).OfType<Dictionary<string,object>>();
     }
     static bool IsSub(object payload) {
         var p=Unwrap(payload);return J.Get(p,"model_stats") is System.Collections.IList||J.Get(p,"daily_usage") is System.Collections.IList||J.Get(J.Get(p,"usage"),"today")!=null||J.Get(J.Get(p,"usage"),"total")!=null||new[]{"unrestricted","quota_limited"}.Contains(J.Str(p,"mode"))&&(J.Num(p,"balance").HasValue||J.Get(p,"quota") is Dictionary<string,object>);
@@ -80,14 +113,14 @@ internal static class Usage {
         if(key.Length>4096||account.Length>16384||(key+account).IndexOfAny(new[]{'\r','\n'})>=0)throw J.Error("密钥格式无效。");
         string baseUrl=Store.BaseUrl(J.Str(input,"baseUrl")),site=J.Str(input,"siteUrl").Trim();
         var p=J.Map("baseUrl",baseUrl,"siteUrl",site==""?baseUrl:Store.BaseUrl(site),"accountUserId",J.Str(input,"accountUserId"),"quotaPerUnit",J.N(J.Get(input,"quotaPerUnit"))??500000);
-        var range=Range("today");var errors=new List<string>();string choice=J.Str(input,"adapter","auto"),detected=null;object payload=null;
+        var range=Range("today");var errors=new List<string>();string choice=J.Str(input,"adapter","auto"),detected=null;object payload=null;bool stopped=false;
         if(!new[]{"auto","newapi","sub2api"}.Contains(choice))throw J.Error("请选择有效的接口类型。");
         foreach(string type in choice=="auto"?new[]{"newapi","sub2api"}:new[]{choice}){
             try{var result=await Get(Endpoint(p,type,range),key);if(type=="newapi")Unpack(result);else if(!IsSub(result))throw J.Error("返回的数据不是 Sub2API 用量格式。");detected=type;payload=result;break;}
-            catch(Exception ex){errors.Add((type=="newapi"?"NewAPI":"Sub2API")+"："+ErrorText(ex,key,account));}
+            catch(Exception ex){errors.Add((type=="newapi"?"NewAPI":"Sub2API")+"："+ErrorText(ex,key,account));if(!CanProbeAnotherAdapter(ex)){stopped=true;break;}}
         }
-        if(detected==null&&choice!="sub2api")try{if(IsNewToken(await Get(Root(p)+"/api/usage/token",key)))detected="newapi";}catch{}
-        if(detected==null)return J.Map("adapter",null,"message","暂时无法识别接口类型。"+string.Join("；",errors));
+        if(detected==null&&!stopped&&choice!="sub2api")try{if(IsNewToken(await Get(Root(p)+"/api/usage/token",key)))detected="newapi";}catch(Exception ex){errors.Add(ErrorText(ex,key,account));stopped=!CanProbeAnotherAdapter(ex);}
+        if(detected==null)return J.Map("adapter",null,"message",(stopped?"统计接口请求失败。":"暂时无法识别接口类型。")+string.Join("；",errors));
         object balance;try{balance=await AccountBalance(p,detected,key,account,payload);}catch(Exception ex){balance=J.Map("value",null,"message",ErrorText(ex,key,account));}
         return J.Map("adapter",detected,"label",detected=="newapi"?"NewAPI":"Sub2API","balance",balance);
     }
@@ -114,18 +147,31 @@ internal static class Usage {
         if(!total.HasValue||total<=0||total>9007199254740991d||write>9007199254740991d||read+write>total){row["reason"]="输入与缓存数量矛盾或输入为零";return row;}
         row["input"]=total;row["rate"]=read/total;row["valid"]=true;return row;
     }
-    static double? Sum(IEnumerable<Dictionary<string,object>> rows,string field) {var values=rows.Select(r=>J.Num(r,field)).ToList();return values.Any(v=>!v.HasValue)?null:(double?)values.Sum(v=>v.Value);}
-    static Dictionary<string,object> AggregateLogs(List<Dictionary<string,object>> rows) {
-        var valid=rows.Where(r=>J.True(J.Get(r,"valid"))).ToList();double input=valid.Sum(r=>J.Num(r,"input").Value),read=valid.Sum(r=>J.Num(r,"read").Value),write=valid.Sum(r=>J.Num(r,"write").Value);
-        var samples=rows.Where(r=>J.True(J.Get(r,"hasCache"))).ToList();int hits=samples.Count(r=>J.Num(r,"read")>0),missing=rows.Count-valid.Count;var output=Sum(rows,"output");
-        return J.Map("input",input,"read",read,"write",write,"valid",valid.Count,"samples",samples.Count,"hits",hits,"missing",missing,"reasons",rows.Where(r=>!J.True(J.Get(r,"valid"))).GroupBy(r=>J.Str(r,"reason")).ToDictionary(g=>g.Key,g=>(object)g.Count()),"tokenRate",input>0?(double?)read/input:null,"requestRate",samples.Count>0?(double?)hits/samples.Count:null,"requests",rows.Count,"excluded",missing,"output",output,"cost",Sum(rows,"cost"),"standardCost",Sum(rows,"standardCost"),"plain",missing==0?(double?)input-read-write:null,"totalTokens",missing==0&&output.HasValue?input+output:null);
+    static Dictionary<string,object> AggregateLogs(IEnumerable<Dictionary<string,object>> rows) {
+        double input=0,read=0,write=0;double? output=0,cost=0,standardCost=0;
+        int count=0,valid=0,samples=0,hits=0;var reasons=new Dictionary<string,object>();
+        foreach(var row in rows){
+            count++;output+=J.Num(row,"output");cost+=J.Num(row,"cost");standardCost+=J.Num(row,"standardCost");
+            if(J.True(J.Get(row,"valid"))){valid++;input+=J.Num(row,"input").Value;read+=J.Num(row,"read").Value;write+=J.Num(row,"write").Value;}
+            else{string reason=J.Str(row,"reason");object previous;reasons[reason]=reasons.TryGetValue(reason,out previous)?(int)previous+1:1;}
+            if(J.True(J.Get(row,"hasCache"))){samples++;if(J.Num(row,"read")>0)hits++;}
+        }
+        int missing=count-valid;
+        return J.Map("input",input,"read",read,"write",write,"valid",valid,"samples",samples,"hits",hits,"missing",missing,"reasons",reasons,"tokenRate",input>0?(double?)read/input:null,"requestRate",samples>0?(double?)hits/samples:null,"requests",count,"excluded",missing,"output",output,"cost",cost,"standardCost",standardCost,"plain",missing==0?(double?)input-read-write:null,"totalTokens",missing==0&&output.HasValue?input+output:null);
     }
     internal static object NewUsage(object payload,string period,string model,double divisor) {
-        var range=Range(period);var raw=Unpack(payload).Where(r=>J.Num(r,"type")==2).ToList();var rows=new List<Dictionary<string,object>>();
-        foreach(var log in raw){var row=NormalizeLog(log);row["output"]=J.Nonnegative(J.Get(log,"completion_tokens"));var quota=J.Nonnegative(J.Get(log,"quota"));row["cost"]=quota.HasValue?quota/divisor:null;row["standardCost"]=J.Nonnegative(J.Get(log,"standard_cost"));rows.Add(row);}
-        var selected=rows.Where(r=>(model=="all"||J.Str(r,"model")==model)&&(period=="all"||J.Num(r,"timestamp").HasValue&&string.CompareOrdinal(J.Str(r,"date"),J.Str(range,"start"))>=0&&string.CompareOrdinal(J.Str(r,"date"),J.Str(range,"end"))<=0)).ToList();
-        Func<string,List<object>> groups=field=>selected.GroupBy(r=>J.Str(r,field)).Select(g=>{var x=AggregateLogs(g.ToList());x["name"]=g.Key;return (object)x;}).ToList();
-        return J.Map("mode","logs","totals",AggregateLogs(selected),"models",groups("model"),"daily",groups("date").OrderBy(r=>J.Str(r,"name")).ToList(),"hourly",groups("hour").Where(r=>J.Str(r,"name")!="未记录时间").OrderBy(r=>J.Str(r,"name")).ToList(),"logs",selected.OrderByDescending(r=>J.Num(r,"timestamp")??0).Take(300).Cast<object>().ToList(),"modelNames",rows.Select(r=>J.Str(r,"model")).Distinct().ToList(),"range",range,"note","近期日志快照；站点可能限制返回条数，时间筛选只作用于已返回的记录。","costNote","API 密钥消费 · 日志额度 ÷ "+divisor.ToString(CultureInfo.InvariantCulture)+"；仅统计返回记录，账户余额为当前值。");
+        var range=Range(period);var selected=new List<Dictionary<string,object>>();var modelNames=new List<string>();var seenModels=new HashSet<string>();
+        string start=J.Str(range,"start"),end=J.Str(range,"end");
+        foreach(var log in Unpack(payload)){
+            if(J.Num(log,"type")!=2)continue;
+            string name=J.Str(log,"model_name","未记录模型");if(seenModels.Add(name))modelNames.Add(name);
+            if(model!="all"&&name!=model)continue;
+            var row=NormalizeLog(log);
+            if(period!="all"&&(!J.Num(row,"timestamp").HasValue||string.CompareOrdinal(J.Str(row,"date"),start)<0||string.CompareOrdinal(J.Str(row,"date"),end)>0))continue;
+            row["output"]=J.Nonnegative(J.Get(log,"completion_tokens"));var quota=J.Nonnegative(J.Get(log,"quota"));row["cost"]=quota.HasValue?quota/divisor:null;row["standardCost"]=J.Nonnegative(J.Get(log,"standard_cost"));selected.Add(row);
+        }
+        Func<string,List<object>> groups=field=>selected.GroupBy(r=>J.Str(r,field)).Select(g=>{var x=AggregateLogs(g);x["name"]=g.Key;return (object)x;}).ToList();
+        return J.Map("mode","logs","totals",AggregateLogs(selected),"models",groups("model"),"daily",groups("date").OrderBy(r=>J.Str(r,"name")).ToList(),"hourly",groups("hour").Where(r=>J.Str(r,"name")!="未记录时间").OrderBy(r=>J.Str(r,"name")).ToList(),"logs",selected.OrderByDescending(r=>J.Num(r,"timestamp")??0).Take(300).Cast<object>().ToList(),"modelNames",modelNames,"range",range,"note","近期日志快照；站点可能限制返回条数，时间筛选只作用于已返回的记录。","costNote","API 密钥消费 · 日志额度 ÷ "+divisor.ToString(CultureInfo.InvariantCulture)+"；仅统计返回记录，账户余额为当前值。");
     }
     internal static Dictionary<string,object> NormalizeSub(object value,string name) {
         var plain=J.Count(J.Get(value,"input_tokens"));var read=J.Count(J.Get(value,"cache_read_tokens"));var write=J.Count(J.Has(value,"cache_creation_tokens")?J.Get(value,"cache_creation_tokens"):J.Get(value,"cache_write_tokens"));var output=J.Count(J.Get(value,"output_tokens"));
@@ -136,8 +182,12 @@ internal static class Usage {
         row["input"]=input;row["totalTokens"]=output.HasValue?(double?)input+output:null;row["tokenRate"]=input>0?read/input:null;row["valid"]=true;return row;
     }
     static Dictionary<string,object> AggregateSub(List<Dictionary<string,object>> groups) {
-        var valid=groups.Where(r=>J.True(J.Get(r,"valid"))).ToList();double input=valid.Sum(r=>J.Num(r,"input").Value),read=valid.Sum(r=>J.Num(r,"read").Value),write=valid.Sum(r=>J.Num(r,"write").Value);int excluded=groups.Count-valid.Count;var output=Sum(groups,"output");
-        return J.Map("input",input,"read",read,"write",write,"output",output,"plain",excluded==0?(double?)input-read-write:null,"totalTokens",excluded==0&&output.HasValue?input+output:null,"cost",Sum(groups,"cost"),"standardCost",Sum(groups,"standardCost"),"requests",Sum(groups,"requests"),"excluded",excluded,"tokenRate",input>0?(double?)read/input:null,"requestRate",null);
+        double input=0,read=0,write=0;double? output=0,cost=0,standardCost=0,requests=0;int excluded=0;
+        foreach(var row in groups){
+            output+=J.Num(row,"output");cost+=J.Num(row,"cost");standardCost+=J.Num(row,"standardCost");requests+=J.Num(row,"requests");
+            if(J.True(J.Get(row,"valid"))){input+=J.Num(row,"input").Value;read+=J.Num(row,"read").Value;write+=J.Num(row,"write").Value;}else excluded++;
+        }
+        return J.Map("input",input,"read",read,"write",write,"output",output,"plain",excluded==0?(double?)input-read-write:null,"totalTokens",excluded==0&&output.HasValue?input+output:null,"cost",cost,"standardCost",standardCost,"requests",requests,"excluded",excluded,"tokenRate",input>0?(double?)read/input:null,"requestRate",null);
     }
     internal static object SubUsage(object payload,string period,string model) {
         var data=Unwrap(payload);var range=Range(period);
@@ -171,28 +221,32 @@ internal static class Usage {
         return J.Map("value",quota/divisor,"unit","USD","label","账户余额","source",source+" · "+conversion+" 1 USD = "+divisor.ToString(CultureInfo.InvariantCulture)+" 额度","rawQuota",quota,"divisor",divisor);
     }
     public static async Task<object> Inspect(Store store,string id,string period,string model="all") {
-        var range=Range(period);var p=J.Obj(J.Clone(store.Details(id)));string key=J.Str(p,"key"),account=J.Str(p,"accountKey"),choice=J.Str(p,"adapter","auto"),preferred=J.Str(p,"detectedAdapter","newapi");
-        string[] types=choice=="auto"?new[]{preferred,preferred=="newapi"?"sub2api":"newapi"}:new[]{choice};string detected=null,error="";object payload=null,usage=null,balance=null;var errors=new List<string>();
+        var range=Range(period);var p=store.Details(id);string key=J.Str(p,"key"),account=J.Str(p,"accountKey"),choice=J.Str(p,"adapter","auto"),preferred=J.Str(p,"detectedAdapter","newapi");
+        string[] types=choice=="auto"?new[]{preferred,preferred=="newapi"?"sub2api":"newapi"}:new[]{choice};string detected=null,error="";object payload=null,usage=null,balance=null;var errors=new List<string>();bool stopped=false,transportFailed=false;
         foreach(string type in types) {
             try {var result=await Get(Endpoint(p,type,range),key);if(type=="newapi")Unpack(result);else if(!IsSub(result))throw J.Error("返回的数据不是 Sub2API 用量格式。");payload=result;detected=type;break;}
-            catch(Exception ex){errors.Add((type=="newapi"?"NewAPI":"Sub2API")+"："+ErrorText(ex,key,account));}
+            catch(Exception ex){errors.Add((type=="newapi"?"NewAPI":"Sub2API")+"："+ErrorText(ex,key,account));if(!CanProbeAnotherAdapter(ex)){stopped=true;transportFailed=TransportFailure(ex);break;}}
         }
-        if(detected==null&&choice=="auto") {
-            try {var token=await Get(Root(p)+"/api/usage/token",key);if(IsNewToken(token)){detected="newapi";error="已识别为 NewAPI，但近期日志查询失败："+string.Join("；",errors);}}catch{}
+        if(detected==null&&!stopped&&choice=="auto") {
+            try {var token=await Get(Root(p)+"/api/usage/token",key);if(IsNewToken(token)){detected="newapi";error="已识别为 NewAPI，但近期日志查询失败："+string.Join("；",errors);}}catch(Exception ex){errors.Add(ErrorText(ex,key,account));stopped=!CanProbeAnotherAdapter(ex);transportFailed=TransportFailure(ex);}
         }
         string effective=detected??(choice=="auto"?J.Str(p,"detectedAdapter"):choice);
-        if(detected==null)error=choice=="auto"?"无法自动识别接口类型。"+string.Join("；",errors):string.Join("；",errors);
-        try {balance=effective!=""?await AccountBalance(p,effective,key,account,payload):J.Map("value",null,"label","账户余额","message","尚未识别接口类型，请检查地址和密钥。");}
+        if(detected==null)error=(stopped?"统计接口请求失败。":choice=="auto"&&effective==""?"无法自动识别接口类型。":"用量查询失败。")+string.Join("；",errors);
+        try {balance=transportFailed?J.Map("value",null,"label","账户余额","message",error):effective!=""?await AccountBalance(p,effective,key,account,payload):J.Map("value",null,"label","账户余额","message","尚未识别接口类型，请检查地址和密钥。");}
         catch(Exception ex){balance=J.Map("value",null,"label","账户余额","message",ErrorText(ex,key,account));}
         if(payload!=null)try {
             double divisor=J.Num(balance,"divisor")??J.Num(p,"quotaPerUnit")??500000;
             if(effective=="newapi"&&!J.Num(balance,"divisor").HasValue)try{var status=Unwrap(await Get(Root(p)+"/api/status",""));if(J.Num(status,"quota_per_unit")>0)divisor=J.Num(status,"quota_per_unit").Value;}catch{}
-            usage=effective=="newapi"?NewUsage(payload,period,model,divisor):SubUsage(payload,period,model);
+            // Keep small responses cheap; group large log snapshots off the UI thread.
+            object logs=J.Get(payload,"data");if(!(logs is System.Collections.IList))logs=J.Get(logs,"items");
+            usage=effective=="newapi"&&logs is System.Collections.IList&&((System.Collections.IList)logs).Count>256
+                ?await Task.Run(()=>NewUsage(payload,period,model,divisor))
+                :effective=="newapi"?NewUsage(payload,period,model,divisor):SubUsage(payload,period,model);
         }catch(Exception ex){error=ErrorText(ex,key,account);}
-        if(choice=="auto"&&detected!=null)store.SetDetection(id,J.Str(p,"revision"),detected);
+        if(choice=="auto"&&detected!=null)store.SetDetection(id,J.Str(p,"revision"),detected,false);
         store.RequireRevision(id,J.Str(p,"revision"));string at=J.Now();error=Sanitize(error,key,account);
         store.Record(id,J.Map("at",at,"period",period,"model",model,"adapter",effective==""?null:effective,"balance",balance,"totals",J.Get(usage,"totals"),"error",error));
-        var inspection=J.Map("id",id,"at",at,"period",period,"model",model,"range",range,"revision",J.Str(p,"revision"),"adapter",effective==""?null:effective,"usage",usage,"usageError",error,"balance",balance,"history",store.Snapshots(id));
+        var inspection=J.Map("id",id,"at",at,"period",period,"model",model,"range",range,"revision",J.Str(p,"revision"),"adapter",effective==""?null:effective,"usage",usage,"usageError",error,"balance",balance);
         inspection["summary"]=UsageCache.Put(store,inspection);return inspection;
     }
     internal static string ErrorText(Exception error,params string[] secrets){
@@ -200,9 +254,10 @@ internal static class Usage {
         for(var current=error;current!=null;current=current.InnerException){
             timeout|=current is OperationCanceledException;
             var web=current as WebException;tls|=web!=null&&(web.Status==WebExceptionStatus.SecureChannelFailure||web.Status==WebExceptionStatus.TrustFailure);
+            timeout|=web!=null&&web.Status==WebExceptionStatus.Timeout;tls|=current is AuthenticationException;
             if(!messages.Contains(current.Message))messages.Add(current.Message);
         }
-        return Sanitize((timeout?"连接超时，请检查网络或代理。":tls?"HTTPS 安全连接失败，请检查系统时间、证书或代理。":"")+string.Join(" → ",messages),secrets);
+        return Sanitize(timeout?"连接超时，请稍后重试或检查网络、代理。":(tls?"HTTPS 安全连接失败，请稍后重试或检查系统时间、证书、代理。":"")+string.Join(" → ",messages),secrets);
     }
     public static string Sanitize(string value,params string[] secrets) {value=value??"查询失败";foreach(string secret in secrets)if(!string.IsNullOrEmpty(secret))value=value.Replace(secret,"[密钥已隐藏]");value=Regex.Replace(value,@"(?:sk-[\w-]{10,}|Bearer\s+[\w.\-]+)","[密钥已隐藏]");return value.Length>500?value.Substring(0,500):value;}
 }

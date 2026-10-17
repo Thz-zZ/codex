@@ -154,6 +154,44 @@ def test_journal_extends_stale_database_without_duplicate_messages(home):
     assert messages[-1].time == 1789365689.635
 
 
+def test_journal_read_failure_does_not_advance_deduplication_state(home, monkeypatch):
+    from contextlib import contextmanager
+    import session_manager.store as store
+    sid = add_session(home, count=0)
+    session = inventory(home).sessions[sid]
+    path = Path(next(iter(session.paths)))
+    events = [{'type': 'session_meta', 'payload': {'id': sid, 'session_id': sid}}]
+    events.extend({'type': 'event_msg', 'payload': {'type': 'item_completed',
+        'item': {'type': 'agentMessage', 'id': str(i), 'text': f'message {i}'}}} for i in range(5))
+    path.write_text('\n'.join(json.dumps(e) for e in events), encoding='utf-8')
+    reader = PreviewReader(home)
+    reader.PAGE_SIZE = 2
+    first = reader.page(session)
+    cursor = first.cursor
+    seen = set(cursor['seen'])
+    original = store.open_rollout
+    @contextmanager
+    def failing_open(path):
+        with original(path) as stream:
+            class FailingStream:
+                calls = 0
+                def seek(self, offset):
+                    return stream.seek(offset)
+                def readline(self):
+                    self.calls += 1
+                    if self.calls == 2:
+                        raise OSError('mid-page fixture')
+                    return stream.readline()
+            yield FailingStream()
+    with monkeypatch.context() as m:
+        m.setattr(store, 'open_rollout', failing_open)
+        with pytest.raises(OSError, match='mid-page fixture'):
+            reader.page(session, cursor)
+    assert cursor['seen'] == seen
+    retried = reader.page(session, cursor)
+    assert [m.text for m in retried.messages] == ['message 2', 'message 3']
+
+
 def test_dialogue_mode_skips_tool_only_api_pages(home):
     sid = add_session(home)
     class Rpc:

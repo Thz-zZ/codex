@@ -1,4 +1,6 @@
 """Bridge behavior uses synthetic homes only; no user data or clients."""
+import json
+from pathlib import Path
 import sqlite3
 import time
 
@@ -44,6 +46,65 @@ def test_inventory_preview_and_bound_pagination(home):
         s.dispatch('preview', {'id': first, 'tools': True, 'cursor': page['cursor']})
     rest = s.dispatch('preview', {'id': first, 'cursor': page['cursor']})
     assert rest['messages'][0]['text'] != page['messages'][0]['text']
+
+
+@pytest.mark.parametrize('offline', [False, True])
+def test_list_scans_local_inventory_once_and_keeps_fallback(home, offline):
+    sid = add_session(home)
+    s = service(home)
+    scans = []
+    reader = s.reader
+    def scan(*args, **kwargs):
+        scans.append(1)
+        return reader(*args, **kwargs)
+    s.reader = scan
+    if offline:
+        def unavailable():
+            raise RuntimeError('offline fixture')
+        s.rpc.list_threads = unavailable
+    result = s.list_sessions()
+    assert len(scans) == 1 and result['sessions'][0]['id'] == sid
+    assert bool(result['warnings']) == offline
+
+
+def test_journal_pagination_releases_old_states_and_replays_last_request(home, monkeypatch):
+    sid = add_session(home, mode='paginated', count=4)
+    other = add_session(home, count=130)
+    path = Path(next(iter(inventory(home).sessions[sid].paths)))
+    events = [{'type': 'session_meta', 'payload': {'id': sid, 'session_id': sid}}]
+    for i in range(604):
+        event = {'type': 'event_msg', 'payload': {'type': 'item_completed',
+            'item': {'type': 'agentMessage', 'id': str(i), 'text': f'journal {i}'}}}
+        events.extend([event, event])
+    path.write_text('\n'.join(json.dumps(e) for e in events), encoding='utf-8')
+    s = service(home)
+    page = s.preview({'id': sid})
+    messages, shared_seen = list(page['messages']), None
+    first_token = page['cursor']
+    def failed_read(*args, **kwargs):
+        raise OSError('retry fixture')
+    with monkeypatch.context() as m:
+        m.setattr('service.PreviewReader.page', failed_read)
+        with pytest.raises(OSError, match='retry fixture'):
+            s.preview({'id': sid, 'cursor': first_token})
+    assert s.tokens[first_token][2]['result'] is None
+    for _ in range(20):
+        token = page['cursor']
+        if token is None:
+            break
+        state = s.tokens[token][2]['cursor']
+        if shared_seen is None:
+            shared_seen = state['seen']
+        assert state['seen'] is shared_seen
+        page = s.preview({'id': sid, 'cursor': token})
+        assert s.preview({'id': sid, 'cursor': token}) == page
+        messages.extend(page['messages'])
+        assert sum(entry[1] == 'cursor' for entry in s.tokens.values()) <= 2
+    assert page['cursor'] is None
+    assert len(messages) == 604 and len({m['text'] for m in messages}) == 604
+    assert all(entry[2]['cursor'] is None for entry in s.tokens.values() if entry[1] == 'cursor')
+    s.preview({'id': other})
+    assert sum(entry[1] == 'cursor' for entry in s.tokens.values()) == 1
 
 
 def test_delete_requires_review_and_consumes_plan(home):

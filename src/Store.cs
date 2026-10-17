@@ -29,11 +29,23 @@ internal sealed class Store {
     string Key(object p,string name="keyEncrypted"){return Secure.Decrypt(J.Str(p,name));}
     Dictionary<string,object> Pub(Dictionary<string,object> p){var x=new Dictionary<string,object>(p);x.Remove("keyEncrypted");x.Remove("accountEncrypted");x["hasKey"]=J.Str(p,"keyEncrypted")!="";x["hasAccountKey"]=J.Str(p,"accountEncrypted")!="";return x;}
     public object Details(string id){var p=Find(id);var x=Pub(p);x["key"]=Key(p);x["accountKey"]=Key(p,"accountEncrypted");return x;}
-    public object List(){var info=ConfigInfo();string currentKey="";if(J.True(J.Get(info,"exists"))){var toml=ParseToml(System.IO.File.ReadAllText(Path.Combine(J.Str(info,"dir"),"config.toml")));var modelProviders=J.Obj(J.Get(toml,"model_providers"));currentKey=J.Str(J.Get(modelProviders,J.Str(info,"provider")),"experimental_bearer_token");}
-        var matches=Providers.Where(p=>SameBaseUrl(J.Str(info,"baseUrl"),J.Str(p,"baseUrl"))&&(currentKey!=""?Key(p)==currentKey:(J.Str(info,"provider")=="codex_relay"||J.Str(info,"provider")=="custom")&&J.Str(Data,"activeId")==J.Str(p,"id"))).ToList();string active=matches.FirstOrDefault(p=>J.Str(p,"id")==J.Str(Data,"activeId"))!=null?J.Str(Data,"activeId"):J.Str(matches.FirstOrDefault(),"id");
-        return J.Map("providers",Providers.Select(p=>{var x=Pub(p);x["active"]=J.Str(p,"id")==active;return x;}).ToList(),"usageCache",UsageCache.Load(this),"appSettings",J.Get(Data,"appSettings"),"config",info,"history",History.Take(100).Cast<object>().ToList(),"dataDir",Dir);}
+    Dictionary<string,object> ReadConfig(){string file=Path.Combine(ConfigDir,"config.toml");return System.IO.File.Exists(file)?ParseToml(System.IO.File.ReadAllText(file)):null;}
+    string ActiveId(object doc,object info,List<Dictionary<string,object>> providers){
+        string currentKey=J.Str(J.Get(J.Get(doc,"model_providers"),J.Str(info,"provider")),"experimental_bearer_token"),saved=J.Str(Data,"activeId"),first="";
+        foreach(var p in providers){
+            string id=J.Str(p,"id");
+            if(!SameBaseUrl(J.Str(info,"baseUrl"),J.Str(p,"baseUrl"))||!(currentKey!=""?Key(p)==currentKey:(J.Str(info,"provider")=="codex_relay"||J.Str(info,"provider")=="custom")&&saved==id))continue;
+            if(id==saved)return id;if(first=="")first=id;
+        }
+        return first;
+    }
+    internal string ActiveProviderId(){var doc=ReadConfig();return ActiveId(doc,ConfigInfo(doc),Providers);}
+    internal IEnumerable<string> ProviderIds {get{return Providers.Select(p=>J.Str(p,"id"));}}
+    public object List(){var doc=ReadConfig();var info=ConfigInfo(doc);var providers=Providers;string active=ActiveId(doc,info,providers);
+        return J.Map("providers",providers.Select(p=>{var x=Pub(p);x["active"]=J.Str(p,"id")==active;return x;}).ToList(),"usageCache",UsageCache.Load(this),"appSettings",J.Get(Data,"appSettings"),"config",info,"history",History.Take(100).Cast<object>().ToList(),"dataDir",Dir);}
     static bool SameBaseUrl(string left,string right){try{return BaseUrl(left)==BaseUrl(right);}catch{return left==right;}}
-    public object ConfigInfo(){string file=Path.Combine(ConfigDir,"config.toml");if(!System.IO.File.Exists(file))return J.Map("exists",false,"dir",ConfigDir,"model","","reasoning","","provider","","baseUrl","");var doc=ParseToml(System.IO.File.ReadAllText(file));string id=J.Str(doc,"model_provider","openai");var providers=J.Obj(J.Get(doc,"model_providers"));var p=J.Obj(J.Get(providers,id));return J.Map("exists",true,"dir",ConfigDir,"provider",id,"model",J.Str(doc,"model"),"reasoning",J.Str(doc,"model_reasoning_effort"),"baseUrl",J.Str(p,"base_url"),"hasKey",J.Str(p,"experimental_bearer_token")!="");}
+    public object ConfigInfo(){return ConfigInfo(ReadConfig());}
+    object ConfigInfo(object doc){if(doc==null)return J.Map("exists",false,"dir",ConfigDir,"model","","reasoning","","provider","","baseUrl","");string id=J.Str(doc,"model_provider","openai");var providers=J.Obj(J.Get(doc,"model_providers"));var p=J.Obj(J.Get(providers,id));return J.Map("exists",true,"dir",ConfigDir,"provider",id,"model",J.Str(doc,"model"),"reasoning",J.Str(doc,"model_reasoning_effort"),"baseUrl",J.Str(p,"base_url"),"hasKey",J.Str(p,"experimental_bearer_token")!="");}
     static string NormalizeToml(string source){var lines=source.Split(new[]{"\r\n","\n"},StringSplitOptions.None).ToList();for(int i=0;i<lines.Count;i++){if(!Regex.IsMatch(lines[i],@"^\s*\[\s*model_providers\s*\]\s*(?:#.*)?$"))continue;bool implicitParent=lines.Take(i).Any(line=>Regex.IsMatch(line,@"^\s*\[\[?\s*model_providers\s*\."));if(!implicitParent)continue;bool empty=true;for(int j=i+1;j<lines.Count&&!Regex.IsMatch(lines[j],@"^\s*\[\[?");j++)if(!Regex.IsMatch(lines[j],@"^\s*(?:#.*)?$")){empty=false;break;}if(empty){lines.RemoveAt(i);i--;}}return string.Join(source.Contains("\r\n")?"\r\n":"\n",lines);}
     static Dictionary<string,object> ParseToml(string source){try{var table=Nett.Toml.ReadString(NormalizeToml(source));return table.ToDictionary();}catch{throw J.Error("Codex 的 config.toml 格式无效；请先修复，或在设置中选择正确目录。");}}
     internal static string BaseUrl(string raw){var s=(raw??"").Trim();if(s=="")throw J.Error("请填写中转地址。");if(!s.Contains("://"))s="https://"+s;Uri u;if(!Uri.TryCreate(s,UriKind.Absolute,out u)||(u.Scheme!="https"&&!(u.Scheme=="http"&&(u.Host=="localhost"||u.Host=="127.0.0.1"))))throw J.Error("中转地址格式不正确，请使用 HTTPS 地址。");if(u.UserInfo!=""||u.Query!=""||u.Fragment!="")throw J.Error("地址请勿包含账号、查询参数或片段。");string path=u.AbsolutePath.TrimEnd('/');foreach(string suffix in new[]{"/api/log/token","/v1/usage","/v1"})if(path.EndsWith(suffix,StringComparison.OrdinalIgnoreCase))path=path.Substring(0,path.Length-suffix.Length);return u.GetLeftPart(UriPartial.Authority)+path;}
@@ -69,7 +81,7 @@ internal sealed class Store {
     public void Record(string id,object snapshot){var list=J.Arr(J.Get(Data,"snapshots"));var x=J.Obj(J.Clone(snapshot));x["id"]=id;list.Insert(0,x);Data["snapshots"]=list.Take(1000).ToList();Save();}
     public string Secret(string id,string field="keyEncrypted"){return Key(Find(id),field);}
     public int JCount(){return Providers.Count;}
-    public void SetDetection(string id,string revision,string adapter){var p=Find(id);if(J.Str(p,"revision")!=revision)return;p["detectedAdapter"]=adapter;p["detectedAt"]=J.Now();Save();}
+    public void SetDetection(string id,string revision,string adapter,bool save=true){var p=Find(id);if(J.Str(p,"revision")!=revision)return;p["detectedAdapter"]=adapter;p["detectedAt"]=J.Now();if(save)Save();}
     public void RequireRevision(string id,string revision){if(J.Str(Find(id),"revision")!=revision)throw J.Error("中转已修改或删除，旧查询结果已丢弃，请重新刷新。");}
 }
 }

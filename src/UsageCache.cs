@@ -11,7 +11,7 @@ internal static class UsageCache {
         var range=Usage.Range("today",now);var providers=J.Arr(J.Get(store.Data,"providers"));var result=new List<object>();
         foreach(var item in Read(store)){
             if(!providers.Any(p=>J.Str(p,"id")==J.Str(item,"id")&&J.Str(p,"revision")==J.Str(item,"revision")))continue;
-            var value=J.Obj(J.Clone(item));
+            var value=J.Obj(item);
             if(J.Str(J.Get(value,"range"),"end")!=J.Str(range,"end")){
                 value["totals"]=null;value["usageAt"]=null;value["checkedAt"]=null;value["usageError"]="";value["range"]=range;
             }

@@ -13,11 +13,11 @@ internal static class J {
     public static object Decode(string value) { return new JavaScriptSerializer { MaxJsonLength=16*1024*1024, RecursionLimit=100 }.DeserializeObject(value.TrimStart('\uFEFF')); }
     public static Dictionary<string,object> Obj(object v) { return v as Dictionary<string,object> ?? new Dictionary<string,object>(); }
     public static Dictionary<string,object> Map(params object[] pairs) { var d=new Dictionary<string,object>(); for(int i=0;i<pairs.Length;i+=2)d[(string)pairs[i]]=pairs[i+1];return d; }
-    public static object Get(object v, string k, object fallback=null) { object r;return Obj(v).TryGetValue(k,out r)?r:fallback; }
+    public static object Get(object v, string k, object fallback=null) { var d=v as Dictionary<string,object>;object r;return d!=null&&d.TryGetValue(k,out r)?r:fallback; }
     public static string S(object v) { return v==null?"":Convert.ToString(v,CultureInfo.InvariantCulture); }
     public static string Str(object v,string k,string fallback="") { return S(Get(v,k,fallback)); }
     public static List<object> Arr(object v) { var a=v as IList;return a==null?new List<object>():a.Cast<object>().ToList(); }
-    public static bool Has(object v,string k) { return Obj(v).ContainsKey(k); }
+    public static bool Has(object v,string k) { var d=v as Dictionary<string,object>;return d!=null&&d.ContainsKey(k); }
     public static bool True(object v) { return v is bool && (bool)v; }
     public static double? N(object v) { double n;if(v==null||v is bool||string.IsNullOrWhiteSpace(S(v))||!double.TryParse(S(v),NumberStyles.Float,CultureInfo.InvariantCulture,out n)||double.IsNaN(n)||double.IsInfinity(n))return null;return n; }
     public static double? Num(object v,string k) { return N(Get(v,k)); }

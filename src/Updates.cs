@@ -120,7 +120,7 @@ internal sealed class UpdateService {
             if(!response.IsSuccessStatusCode)throw new UpdateRequestException(response.StatusCode);
             using(var input=await response.Content.ReadAsStreamAsync())using(var output=new MemoryStream()){
                 var buffer=new byte[8192];int count;while((count=await input.ReadAsync(buffer,0,buffer.Length,token))>0){if(output.Length+count>1024*1024)throw J.Error("更新清单过大。");output.Write(buffer,0,count);}
-                return J.Decode(System.Text.Encoding.UTF8.GetString(output.ToArray()));
+                return J.Decode(System.Text.Encoding.UTF8.GetString(output.GetBuffer(),0,(int)output.Length));
             }
         }
     }

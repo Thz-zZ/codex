@@ -2,7 +2,8 @@
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=v=>Number.isFinite(v)?Number(v).toLocaleString('en-US'):'—';
-const compact=v=>Number.isFinite(v)?Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:2}).format(v):'—';
+const compactFormat=new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:2});
+const compact=v=>Number.isFinite(v)?compactFormat.format(v):'—';
 const rate=v=>Number.isFinite(v)?(v*100).toFixed(2)+'%':'—';
 const dateTime=v=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'—';
 function refreshAge(at,now=Date.now()){
@@ -22,7 +23,7 @@ function updateRefreshTime(){
 const adapterLabel=p=>{const type=p.adapter==='auto'?p.detectedAdapter:p.adapter;return (p.adapter==='auto'?'自动 · ':'')+(type==='sub2api'?'Sub2API':type==='newapi'?'NewAPI':'待识别');};
 const balanceText=b=>Number.isFinite(b?.value)?b.value.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4}):'—';
 let state={providers:[],history:[],config:{}},page='providers',detailId=null,detailEpoch=0,auto=true,nextRefresh=Date.now()+60000,allBusy=false,toastTimer,editorEpoch=0,siteFollowsBase=true,rangePeriod='today',draggedId=null,reorderBusy=false,currentDetail=null,chartGranularity='auto',detectEpoch=0;
-const cache=new Map(),pending=new Set(),requests=new Map(),hiddenSeries=new Set(),detailViews=new Map();
+const cache=new RelayDetailCache(),pending=new Set(),requests=new Map(),hiddenSeries=new Set(),detailViews=new Map(),balanceSummaries=new Map();
 let detailViewSave=Promise.resolve();
 const detailCacheKey=(id,period,model='all')=>id+':'+period+(model==='all'?'':':model:'+model);
 function rememberDetailView(){
@@ -43,11 +44,30 @@ function restoreDetailView(id){
   syncRangeControls();syncModelFilter([],saved?.model||'all');
 }
 const detailStorageKey='relay-detail-cache-v1';
-function hydrateDetails(){try{for(const r of JSON.parse(localStorage.getItem(detailStorageKey)||'[]'))if(state.providers.some(p=>p.id===r.id&&p.revision===r.revision)&&['today','7'].includes(r.period)&&r.range?.end===RelayAdapters.range(r.period).end&&r.usage){const key=detailCacheKey(r.id,r.period,r.model||'all'),previous=cache.get(key);if(!previous||Date.parse(r.at)>=Date.parse(previous.summary?.checkedAt||previous.checkedAt||previous.at))cache.set(key,r);}}catch{}}
-function persistDetails(){try{const values=[...cache.values()].filter(r=>['today','7'].includes(r.period)&&r.usage&&r.range?.end===RelayAdapters.range(r.period).end&&state.providers.some(p=>p.id===r.id&&p.revision===r.revision)).sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,6),saved=[];let size=0;for(const r of values){const length=JSON.stringify(r).length;if(length>512000||size+length>2000000)continue;saved.push(r);size+=length;}localStorage.setItem(detailStorageKey,JSON.stringify(saved));}catch{}}
+let detailCacheHydrated=false;
+function validCache(value){try{return state.providers.some(p=>p.id===value.id&&p.revision===value.revision)&&value.range?.end===RelayAdapters.range(value.period).end;}catch{return false;}}
+function rememberBalance(value){
+  const summary=value.summary||value,at=summary.checkedAt||summary.at||value.at,previous=balanceSummaries.get(value.id);
+  if(!previous||previous.revision!==value.revision||Date.parse(at)>=Date.parse(previous.at)){
+    const hasBalance=Number.isFinite(summary.balance?.value),saved=previous?.revision===value.revision?previous:null;
+    balanceSummaries.set(value.id,{id:value.id,revision:value.revision,at,balance:hasBalance?summary.balance:saved?.balance||summary.balance,balanceAt:hasBalance?(summary.balanceAt||value.balanceAt||at):saved?.balanceAt,balanceError:summary.balanceError||value.balanceError||(!hasBalance?summary.balance?.message:'')});
+  }
+}
+function hydrateDetails(force=false){
+  if(detailCacheHydrated&&!force)return;detailCacheHydrated=true;
+  try{for(const r of JSON.parse(localStorage.getItem(detailStorageKey)||'[]'))if(validCache(r)&&['today','7'].includes(r.period)&&r.usage){
+    delete r.history;
+    rememberBalance(r);
+    const key=detailCacheKey(r.id,r.period,r.model||'all'),previous=cache.peek(key);
+    if(!previous||Date.parse(r.at)>=Date.parse(previous.summary?.checkedAt||previous.checkedAt||previous.at))cache.set(key,RelayDetailCache.merge(previous,r));
+    else if(!previous.usage)cache.set(key,RelayDetailCache.merge(r,previous));
+  }}catch{}
+  persistDetails();
+}
+function persistDetails(){try{const values=[...cache].filter(([,r])=>['today','7'].includes(r.period)&&r.usage&&r.range?.end===RelayAdapters.range(r.period).end&&state.providers.some(p=>p.id===r.id&&p.revision===r.revision)).sort(([,a],[,b])=>Date.parse(b.at)-Date.parse(a.at)).slice(0,6),saved=[];let size=0;for(const [key,r] of values){const length=cache.byteSize(key)/2;if(length>512000||size+length>2000000)continue;saved.push(r);size+=length;}localStorage.setItem(detailStorageKey,JSON.stringify(saved));}catch{}}
 const rangeLabel=period=>({today:'今天',yesterday:'昨天','7':'最近 7 天','30':'最近 30 天',all:'全部记录 / 近 90 天'})[period]||(period.startsWith('range:')?period.slice(6).replace(':',' ～ '):period);
 const usageLabel=()=>rangePeriod==='today'?'今日':rangePeriod==='yesterday'?'昨日':'所选日期';
-function matchingCache(id,period=rangePeriod,model='all'){const value=cache.get(detailCacheKey(id,period,model));return value?.revision===state.providers.find(p=>p.id===id)?.revision&&value?.period===period&&value?.range?.end===RelayAdapters.range(period).end?value:null;}
+function matchingCache(id,period=rangePeriod,model='all',touch=true){const key=detailCacheKey(id,period,model),value=cache.peek(key);if(value?.period!==period||!validCache(value))return null;return touch?cache.get(key):value;}
 function selectedCache(){return matchingCache(detailId,rangePeriod,$('modelFilter').value||'all');}
 const filterPickers=new Map();
 function enhanceFilter(id,icon){
@@ -74,7 +94,7 @@ function enhanceFilter(id,icon){
 async function call(name,input){const result=await window.relay[name](input);if(!result.ok)throw new Error(result.error);return result.data;}
 function toast(message,error=false){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').className='toast'+(error?' error':'');toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),error?9000:6500);}
 function confirmAction(title,text){return new Promise(resolve=>{$('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmDialog').showModal();let done=false;const finish=value=>{if(done)return;done=true;$('confirmDialog').close();$('confirmDialog').removeEventListener('cancel',cancel);resolve(value);};const cancel=e=>{e.preventDefault();finish(false);};$('confirmCancel').onclick=()=>finish(false);$('confirmOkay').onclick=()=>finish(true);$('confirmDialog').addEventListener('cancel',cancel);});}
-function setState(value){state=value;for(const summary of state.usageCache||[]){const key=summary.id+':today',existing=cache.get(key);if(!existing||Date.parse(summary.checkedAt)>Date.parse(existing.summary?.checkedAt||existing.checkedAt||existing.at))cache.set(key,summary);}hydrateDetails();renderState();}
+function setState(value){state=value;for(const [id,entry] of balanceSummaries)if(!state.providers.some(p=>p.id===id&&p.revision===entry.revision))balanceSummaries.delete(id);for(const [key,entry] of cache)if(!validCache(entry))cache.delete(key);for(const summary of state.usageCache||[]){rememberBalance(summary);const key=summary.id+':today',existing=cache.peek(key);if(!existing||Date.parse(summary.checkedAt)>Date.parse(existing.summary?.checkedAt||existing.checkedAt||existing.at))cache.set(key,RelayDetailCache.merge(existing,{...summary,summary}));}hydrateDetails();renderState();}
 function cacheFresh(value){const record=value?.summary||value,at=Date.parse(record&&'checkedAt' in record?record.checkedAt:record?.at);return Number.isFinite(at)&&Date.now()-at>=0&&Date.now()-at<60000;}
 function cachedTime(value){return value?new Date(value).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'尚未查询';}
 function navigate(target){
@@ -111,8 +131,11 @@ function renderProviders(){
   if(draggedId)return;
   if(!state.providers.length){$('providerList').innerHTML='<div class="sidebar-empty">还没有中转<br>点击上方添加，或导入当前配置</div>';return;}
   $('providerList').innerHTML=state.providers.map((p,i)=>{
-    const busy=[...pending].some(k=>k.startsWith(p.id+':')),today=matchingCache(p.id,'today'),week=matchingCache(p.id,'7');
-    const entry=week&&(!today||Date.parse(week.at)>Date.parse(today.summary?.checkedAt||today.checkedAt||today.at))?week:today,snapshot=entry?.summary||entry,balance=snapshot?.balance;
+    const busy=[...pending].some(k=>k.startsWith(p.id+':')),today=matchingCache(p.id,'today','all',false)||(state.usageCache||[]).find(r=>r.id===p.id&&validCache(r)),week=matchingCache(p.id,'7','all',false);
+    let entry=week&&(!today||Date.parse(week.at)>Date.parse(today.summary?.checkedAt||today.checkedAt||today.at))?week:today;
+    const remembered=balanceSummaries.get(p.id);
+    if(remembered&&(!entry||Date.parse(remembered.at)>Date.parse(entry.summary?.checkedAt||entry.checkedAt||entry.at)))entry=remembered;
+    const snapshot=entry?.summary||entry,balance=snapshot?.balance;
     const balanceLabel=Number.isFinite(balance?.value)?`余额 ${balanceText(balance)} USD`:busy&&!entry?'正在查询余额':balance?.message?'余额暂不可用':'余额未查询';
     const balanceClass=Number.isFinite(balance?.value)?(balance.value<0?' negative':' positive'):'';
     return `<article class="provider-card${p.active?' active':''}${page==='details'&&p.id===detailId?' is-viewing':''}" data-id="${esc(p.id)}"><button class="drag-handle" data-tooltip="拖动排序；Alt + ↑ / ↓ 也可移动" aria-label="拖动排序 ${esc(p.name)}"${reorderBusy?' disabled':''}><svg viewBox="0 0 16 24" width="11" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="6" r="1.3"/><circle cx="11" cy="6" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/><circle cx="5" cy="18" r="1.3"/><circle cx="11" cy="18" r="1.3"/></svg></button><button class="provider-select" data-action="details" aria-current="${page==='details'&&p.id===detailId?'true':'false'}" aria-label="查看 ${esc(p.name)} 的余额与用量"><span class="avatar tone-${i%4}">${esc(p.name.slice(0,1))}</span><span class="provider-info"><span class="provider-title"><strong data-tooltip="${esc(p.name)}">${esc(p.name)}</strong>${p.active?'<span class="badge live">使用中</span>':''}</span><span class="provider-subtitle${balanceClass}" data-tooltip="${esc(balance?.message||balance?.source||balanceLabel)}">${esc(balanceLabel)}</span></span></button><button class="icon-button refresh-provider" data-action="refresh" data-tooltip="刷新${esc(p.name)}今天的余额与用量" aria-label="刷新${esc(p.name)}"${busy?' disabled aria-busy="true"':''}>↻</button></article>`;
@@ -167,6 +190,8 @@ function renderDetail(r,loading=false){
   const metric=(label,value,note,featured=false)=>`<div class="metric-card${featured?' featured':''}"><div class="metric-label">${esc(label)}</div><div class="metric-value">${value}</div><div class="metric-note" data-tooltip="${esc(note)}">${esc(note)}</div></div>`;
   let html=`<div class="metrics-grid">${metric(usageLabel()+'消费',balanceText({value:t?.cost})+(Number.isFinite(t?.cost)?'<small>USD</small>':''),Number.isFinite(t?.cost)?'当前 API 密钥 · 实际扣费':'接口未完整提供费用数据')}${metric('Token 缓存命中率',rate(t?.tokenRate),excluded?`${excluded} 条或组无效数据已排除`:'按输入 Token 用量加权')}${metric('缓存读取 Token',compact(t?.read),`总输入 ${compact(t?.input)}`)}${metric('请求数量',fmt(t?.requests),u?.mode==='summary'?'所选时间段汇总':`请求命中率 ${rate(t?.requestRate)}`)}</div>`;
   if(r.usageError)html+=`<div class="notice error">记录查询失败：${esc(r.usageError)}</div>`;
+  if(r.usageStale&&u)html+=`<div class="notice">已保留上次成功的用量与趋势，数据时间：${esc(dateTime(r.usageAt||r.at))}。点击刷新可更新。</div>`;
+  if(r.balanceError&&r.balanceError!==r.usageError)html+=`<div class="notice error">余额查询失败：${esc(r.balanceError)}${Number.isFinite(b?.value)?' 已保留 '+esc(dateTime(r.balanceAt))+' 的余额。':''}</div>`;
   html+=`<div class="detail-meta"><strong>用量分析 <small>${esc(rangeLabel(rangePeriod))}</small></strong></div>`;
   if(u)html+=`<div class="notice">${esc(u.note)} ${esc(u.costNote||'')}</div>`;
   if(u){
@@ -174,12 +199,22 @@ function renderDetail(r,loading=false){
     html+=`<div class="analytics-grid analytics-wide"><section class="chart-card"><div class="chart-heading"><h2>Token 使用趋势</h2>${grainControl}</div><div id="trendChart"></div></section></div>`;
     if(u.mode==='logs')html+=tableCard('近期请求',['时间','模型','输入 Token','输出 Token','缓存读取','缓存写入','缓存率'],u.logs.map(l=>[l.timestamp?esc(new Date(l.timestamp*1000).toLocaleString('zh-CN',{hour12:false})):'—',esc(l.model),fmt(l.input),fmt(l.output),fmt(l.read),fmt(l.write),`<span class="rate-cell" data-tooltip="${esc(l.reason||'')}">${rate(l.rate)}</span>`]),'暂无近期请求。');
   }
-  if(!u)html+='<div class="detail-placeholder"><span class="secure-dot"></span> 已显示上次保存的数据，点击刷新可加载完整用量与趋势。</div>';
+  if(!u)html+=`<div class="detail-placeholder"><span class="secure-dot"></span> ${t?'已显示上次保存的汇总，点击刷新可加载完整用量与趋势。':'暂无可用用量数据，请稍后重试。'}</div>`;
   $('detailBody').innerHTML=html;renderCharts();syncRefreshControls();
 }
 async function fetchProvider(id,period=rangePeriod,model='all'){
   const token=id+':'+period+':'+model;if(requests.has(token))return requests.get(token);pending.add(token);renderProviders();
-  const task=(async()=>{try{const result=await call('inspect',{id,period,model});const p=state.providers.find(p=>p.id===id);if(!p||p.revision!==result.revision)return null;if(p.adapter==='auto'&&result.adapter)p.detectedAdapter=result.adapter;const previous=matchingCache(id,period);cache.set(detailCacheKey(id,period,model),result);if(model!=='all'&&previous)cache.set(detailCacheKey(id,period),{...previous,balance:result.balance,at:result.at});persistDetails();return result;}finally{pending.delete(token);requests.delete(token);renderProviders();}})();
+  const task=(async()=>{try{
+    const response=await call('inspect',{id,period,model}),p=state.providers.find(p=>p.id===id);
+    if(!p||p.revision!==response.revision)return null;
+    if(!response.usage&&!response.usageError)response.usageError='接口未返回用量数据。';
+    if(p.adapter==='auto'&&response.adapter)p.detectedAdapter=response.adapter;
+    const previous=matchingCache(id,period,'all',false),result=RelayDetailCache.merge(matchingCache(id,period,model,false),response);
+    rememberBalance(result);cache.set(detailCacheKey(id,period,model),result);
+    if(result.summary)state.usageCache=[...(state.usageCache||[]).filter(r=>r.id!==id),result.summary];
+    if(model!=='all'&&previous)cache.set(detailCacheKey(id,period),{...previous,balance:result.balance,balanceAt:result.balanceAt,balanceError:result.balanceError});
+    persistDetails();return result;
+  }finally{pending.delete(token);requests.delete(token);renderProviders();}})();
   requests.set(token,task);return task;
 }
 async function refreshAll(){
@@ -200,7 +235,7 @@ function reportRefreshFailure(id,result){
   const name=state.providers.find(p=>p.id===id)?.name||'中转';
   const usageError=result.usageError||(!result.usage?'接口未返回用量数据。':'');
   if(usageError)toast(`${name} 用量刷新失败：${usageError}`,true);
-  else if(!Number.isFinite(result.balance?.value))toast(`${name} 余额刷新失败：${result.balance?.message||'接口未返回账户余额。'}`,true);
+  else if(result.balanceError||!Number.isFinite(result.balance?.value))toast(`${name} 余额刷新失败：${result.balanceError||result.balance?.message||'接口未返回账户余额。'}`,true);
 }
 async function refreshDetails(notifyFailure=true){
   if(!detailId)return;const id=detailId,epoch=++detailEpoch,model=$('modelFilter').value,period=$('period').value;$('refreshDetail').disabled=true;if(!currentDetail)renderDetail(null,true);

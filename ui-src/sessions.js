@@ -50,6 +50,12 @@ window.RelaySessions=(()=>{
     $('sessionListCount').textContent=`显示 ${Math.min(filtered.length,limit)} / ${filtered.length} 个会话`;
     $('sessionMoreRows').classList.toggle('hidden',limit>=filtered.length);controls();
   }
+  function markCurrentRow(){
+    for(const button of $('sessionList').querySelectorAll('[data-session-open]')){
+      const active=button.dataset.sessionOpen===current?.id;
+      button.setAttribute('aria-current',String(active));button.closest('.session-row').classList.toggle('is-current',active);
+    }
+  }
   function applyFilter(){
     selected.clear();limit=150;clearPreview();
     const query=$('sessionSearch').value.trim().normalize('NFKC').toLowerCase();
@@ -70,7 +76,7 @@ window.RelaySessions=(()=>{
     const generation=reset?++epoch:epoch;
     if(reset){current=session;cursor=null;messageCount=0;$('sessionMessages').innerHTML='';$('sessionMessageCount').textContent='对话记录';
       $('sessionPreviewTitle').textContent=session.title;$('sessionPreviewMeta').textContent=(session.cwd||'无项目目录')+(time(session.updated)?' · '+time(session.updated):'');$('sessionPreviewId').textContent=session.id;
-      $('sessionDeleteOne').classList.remove('hidden');renderRows();$('sessionMessages').scrollTop=0;}
+      $('sessionDeleteOne').classList.remove('hidden');markCurrentRow();$('sessionMessages').scrollTop=0;}
     previewJobs++;previewBusy=true;controls();$('sessionMoreMessages').disabled=true;$('sessionPreviewNote').textContent='正在载入对话…';
     try{
       const result=await api('preview',{id:session.id,tools:$('sessionShowTools').checked,cursor});

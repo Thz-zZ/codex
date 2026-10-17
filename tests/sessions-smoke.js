@@ -21,7 +21,8 @@
   $('sessionSearch').value='界面布局';$('sessionSearch').dispatchEvent(new Event('input'));
   check(document.querySelectorAll('.session-row').length===1,'title search');
   $('sessionSelectAll').click();check($('sessionSelectionCount').textContent==='已选 1'&&!$('sessionExport').disabled,'filtered selection for export');
-  document.querySelector('.session-open').click();
+  const openedRow=document.querySelector('.session-open');openedRow.click();
+  check(document.querySelector('.session-open')===openedRow,'selecting a session preserves list nodes and focus');
   await waitFor(()=>$('sessionMessages').querySelectorAll('.session-message').length>0&&!$('sessionPreviewNote').textContent.includes('载入'),'preview loaded');
   const firstCount=$('sessionMessages').querySelectorAll('.session-message').length;
   check(!$('sessionMoreMessages').classList.contains('hidden'),'pagination available');

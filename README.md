@@ -12,7 +12,7 @@
 
 ## 版本与应用打包
 
-当前版本为 **v1.1.9**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
+当前版本为 **v1.2.1**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
 
 运行 `build-release.ps1` 生成可直接运行的 Windows x64 应用文件夹。可通过 `-OutputDirectory` 指定新输出目录。发布包包含应用与会话服务 EXE、DLL、界面、许可、会话管理说明及版本记录。
 
@@ -38,6 +38,16 @@
 
 会话使用说明见 `SESSION-GUIDE.md`。导入与永久删除需要关闭其他 Codex 客户端；不会自动关闭这些客户端。
 
+## 内存管理
+
+详情响应缓存最多保留 24 份，序列化 UTF-16 数据预算为 4 MiB，单份上限为 1 MiB；这些是缓存数据预算，并非进程实际堆内存上限。旧查询按最近使用顺序淘汰，各中转筛选设置独立保留，缓存淘汰后仍需手动刷新。磁盘快照仅在页面初始化时读取，查询响应不再重复携带本地历史。收起到托盘会释放 WebView2 和空闲会话服务，重新进入会话管理时按需启动。
+
+接口响应直接使用现有缓冲区解码，用量汇总减少临时集合；超过 256 条的 NewAPI 日志在后台线程处理。会话列表每次刷新只扫描一次本地数据，长会话预览共享去重集合，仅保留当前分页和最近一次可重试响应，避免旧分页持续累积。
+
 ## 验证
+
+运行 `node --test tests/detail-cache.test.cjs` 验证缓存淘汰、容量计算及大量查询下的数据保留上限。
+
+使用会话虚拟环境运行 `python tests/measure-memory.py "build/Codex Relay Lite.exe"`，可执行隔离桌面 smoke 并采样主程序及全部子进程的工作集和私有内存，结果写入对应构建目录的 `smoke-data/process-memory.json`。工作集合计可能包含共享页，不能直接当作唯一物理内存用量。
 
 使用会话虚拟环境运行 `python -m pytest session-backend/tests -q`。桌面测试先运行 `python tests/seed-session-fixture.py` 创建 build 内的合成会话，再执行 `build/Codex Relay Lite.exe --smoke-test`；运行 `node tests/generate-fixtures.cjs` 后，可通过 `--self-test` 验证原有中转逻辑。期望值来自独立旧版参考快照，生成时仅平移日期，无需其他项目目录。测试不操作真实用户会话。

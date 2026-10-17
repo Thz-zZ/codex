@@ -58,12 +58,15 @@ class SessionService:
         return entry[2]
 
     def list_sessions(self):
-        inv = self.reader(self.home)
+        api_rows, warning = None, ''
         if self.rpc:
             try:
-                inv = self.reader(self.home, self.rpc.list_threads())
+                api_rows = self.rpc.list_threads()
             except Exception as exc:
-                inv.warnings.append('官方接口暂不可用，当前显示本地记录：'+str(exc))
+                warning = '官方接口暂不可用，当前显示本地记录：'+str(exc)
+        inv = self.reader(self.home, api_rows)
+        if warning:
+            inv.warnings.append(warning)
         self.current = inv
         rows = sorted(inv.sessions.values(), key=lambda s: (s.updated, s.id), reverse=True)
         return {'sessions': [session_row(s) for s in rows], 'warnings': inv.warnings,
@@ -79,15 +82,28 @@ class SessionService:
         session = self.current.sessions.get(sid)
         if not session:
             raise ValueError('会话已不存在，请刷新列表。')
-        cursor = None
+        cursor, previous = None, None
         if args.get('cursor'):
-            owner, mode, cursor = self._token(args['cursor'], 'cursor')
-            if owner != sid or mode != tools:
+            previous = self._token(args['cursor'], 'cursor')
+            if previous['owner'] != sid or previous['tools'] != tools:
                 raise ValueError('对话分页已变化，请重新选择会话。')
+            if previous['result'] is not None:
+                return previous['result']
+            cursor = previous['cursor']
         page = PreviewReader(self.home, self.rpc, include_tools=tools).page(session, cursor)
-        next_token = self._remember('cursor', (sid, tools, page.cursor)) if page.cursor is not None else None
-        return {'messages': [asdict(m) for m in page.messages], 'cursor': next_token,
-                'notice': page.notice, 'backend': page.backend}
+        next_token = self._remember('cursor', {'owner': sid, 'tools': tools,
+            'cursor': page.cursor, 'result': None}) if page.cursor is not None else None
+        result = {'messages': [asdict(m) for m in page.messages], 'cursor': next_token,
+                  'notice': page.notice, 'backend': page.backend}
+        # Keep the current position and one replayable response. Older pages and
+        # abandoned previews must not retain copies of an entire journal's IDs.
+        if previous is not None:
+            previous['cursor'], previous['result'] = None, result
+        keep = {args.get('cursor'), next_token}
+        for token, entry in list(self.tokens.items()):
+            if entry[1] == 'cursor' and token not in keep:
+                del self.tokens[token]
+        return result
 
     def prepare_delete(self, ids):
         if not self.rpc:

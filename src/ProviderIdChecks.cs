@@ -14,7 +14,7 @@ internal static class ProviderIdChecks {
                 var p=store.Upsert(J.Map("name",suffix,"baseUrl","https://"+suffix+".example/v1","siteUrl","","key","fake-key-"+suffix));
                 string pid=J.Str(p,"id");var result=store.Switch(pid);var info=J.Get(result,"config");
                 if(J.Str(info,"provider")!=expected||J.Str(info,"baseUrl")!="https://"+suffix+".example")throw J.Error("provider ID must remain stable across relays");
-                var rows=J.Arr(J.Get(result,"providers"));if(rows.Count(x=>J.True(J.Get(x,"active")))!=1||!J.True(J.Get(rows.First(x=>J.Str(x,"id")==pid),"active")))throw J.Error("stable provider active state");
+                var rows=J.Arr(J.Get(result,"providers"));if(rows.Count(x=>J.True(J.Get(x,"active")))!=1||!J.True(J.Get(rows.First(x=>J.Str(x,"id")==pid),"active"))||store.ActiveProviderId()!=pid)throw J.Error("stable provider active state");
             }
         }
         checks.Add("stable provider identity preserves custom, codex_relay and quoted IDs across relay switches");

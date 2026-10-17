@@ -7,8 +7,8 @@ internal sealed partial class MainForm {
     object HandleDetailViewState(object input){
         if(input!=null){
             var values=J.Obj(input);detailViewState.Clear();
-            foreach(var provider in J.Arr(J.Get(store.List(),"providers"))){
-                string id=J.Str(provider,"id");object value;
+            foreach(string id in store.ProviderIds){
+                object value;
                 if(values.TryGetValue(id,out value))detailViewState[id]=value;
             }
         }

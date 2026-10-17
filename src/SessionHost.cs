@@ -9,6 +9,13 @@ internal sealed partial class MainForm {
     SessionBridge sessionBridge;
     string sessionBridgeHome,sessionBridgeExe;
     bool sessionOperation;
+    Task sessionRelease=Task.CompletedTask;
+
+    void ReleaseIdleSessionBridge(){
+        if(sessionOperation||sessionBridge==null)return;
+        var idle=sessionBridge;sessionBridge=null;
+        sessionRelease=Task.Run(()=>idle.Dispose());
+    }
 
     object SessionSettings(){
         return J.Read(Path.Combine(dataDir,"session-settings.json"),J.Map("home","","executable","","readOnly",false));
@@ -25,17 +32,20 @@ internal sealed partial class MainForm {
     async Task<object> SessionCall(string action,object input){
         var settings=SessionSettings();string home=Path.GetFullPath(SessionHome(settings)),exe=J.Str(settings,"executable");
         if(J.True(J.Get(settings,"readOnly"))&&(action=="prepareDelete"||action=="executeDelete"||action=="prepareImport"||action=="executeImport"))throw J.Error("当前为只读模式，请在“读取设置”中关闭只读模式后重试。");
-        if(sessionBridge==null||sessionBridgeHome!=home||sessionBridgeExe!=exe){
-            if(sessionBridge!=null)sessionBridge.Dispose();
-            sessionBridge=new SessionBridge(home,exe);sessionBridgeHome=home;sessionBridgeExe=exe;
-        }
         sessionOperation=true;
-        try{return await sessionBridge.Call(action,input,progress=>{
-            try{if(view!=null)view.CoreWebView2.PostWebMessageAsJson(J.Encode(J.Map("event","sessions-progress","data",progress)));}catch(InvalidOperationException){}
-        });}finally{sessionOperation=false;}
+        try{
+            await sessionRelease;
+            if(sessionBridge==null||sessionBridgeHome!=home||sessionBridgeExe!=exe){
+                if(sessionBridge!=null)sessionBridge.Dispose();
+                sessionBridge=new SessionBridge(home,exe);sessionBridgeHome=home;sessionBridgeExe=exe;
+            }
+            return await sessionBridge.Call(action,input,progress=>{
+                try{if(view!=null)view.CoreWebView2.PostWebMessageAsJson(J.Encode(J.Map("event","sessions-progress","data",progress)));}catch(InvalidOperationException){}
+            });
+        }finally{sessionOperation=false;}
     }
     async Task<object> HandleSessions(object input){
-        string action=J.Str(input,"action");var args=J.Obj(J.Clone(J.Get(input,"args",J.Map())));
+        string action=J.Str(input,"action");var args=new System.Collections.Generic.Dictionary<string,object>(J.Obj(J.Get(input,"args")));
         if(action=="settings")return await SessionStatus();
         if(action=="configure"){
             string home=J.Str(args,"home").Trim(),exe=J.Str(args,"executable").Trim();

@@ -138,7 +138,7 @@
   check(JSON.stringify(await call('snapshots',{id:manualId}))!==manualBefore,'individual manual refresh queries selected relay');
   const savedState=await call('state');
   check(savedState.usageCache.some(x=>x.id===activeId),'backend exposes persisted cache');
-  cache.clear();setState(savedState);
+  cache.clear();setState(savedState);hydrateDetails(true);
   check(Number.isFinite(matchingCache(activeId,'today')?.balance?.value),'startup hydrates balance before network');
   let inspections=0;const originalApi=window.relay;
   try{
@@ -198,12 +198,21 @@
       $('refreshDetail').click();await waitFor(()=>!pending.size&&!$('refreshDetail').disabled,'structured usage failure completes');
       check($('toast').classList.contains('error')&&!$('toast').classList.contains('hidden')&&$('toast').textContent.includes(other.name)&&$('toast').textContent.includes('用量刷新失败')&&$('toast').textContent.includes('503'),'structured usage failure produces a visible named error');
       check($('detailRefreshTime').textContent.startsWith('上次刷新：'+dateTime(failureResult.at)+' · '),'failed result has its refresh timestamp and age');
+      check(Boolean(document.querySelector('#trendChart svg'))&&currentDetail.usage===successfulDetail.usage,'structured failure retains the complete successful chart');
+      check(currentDetail.usageAt===(successfulDetail.usageAt||successfulDetail.at)&&$('detailBody').textContent.includes('已保留上次成功的用量与趋势')&&$('detailBody').textContent.includes(dateTime(currentDetail.usageAt)),'retained chart is explicitly dated instead of appearing newly loaded');
+      check(JSON.parse(localStorage.getItem(detailStorageKey)).some(r=>r.id===other.id&&r.usage&&r.usageError.includes('503')),'failed refresh preserves a complete persisted snapshot and its failure reason');
+      const newerSummary={...successfulDetail.summary,at:new Date(Date.parse(failureResult.at)+2000).toISOString(),checkedAt:new Date(Date.parse(failureResult.at)+2000).toISOString(),usageError:'HTTP 504：后续查询超时'};
+      setState({...state,usageCache:[...(state.usageCache||[]).filter(r=>r.id!==other.id),newerSummary]});
+      check(matchingCache(other.id).usage===successfulDetail.usage,'a newer backend summary cannot replace a complete chart');
+      cache.delete(detailCacheKey(other.id,'today'));setState({...state});hydrateDetails(true);await openDetails(other.id);
+      check(Boolean(document.querySelector('#trendChart svg'))&&currentDetail.usageError.includes('504')&&currentDetail.usageAt===(successfulDetail.usageAt||successfulDetail.at),'rehydration combines a newer failed summary with an older complete disk snapshot');
       window.relay={...successfulApi,inspect:async()=>({ok:false,error:'HTTP 401：密钥无效'})};
       $('refreshDetail').click();await waitFor(()=>!pending.size&&!$('refreshDetail').disabled,'request failure completes');
       check($('toast').textContent.includes('刷新失败')&&$('toast').textContent.includes('401')&&detailId===other.id,'request failure explains the reason and permits retry');
       window.relay={...successfulApi,inspect:async()=>({ok:true,data:{...successfulDetail,balance:{value:null,message:'HTTP 403：余额权限不足'},usageError:''}})};
       $('refreshDetail').click();await waitFor(()=>!pending.size&&!$('refreshDetail').disabled,'balance failure completes');
       check($('toast').textContent.includes('余额刷新失败')&&$('toast').textContent.includes('403')&&Boolean(document.querySelector('#trendChart svg')),'partial balance failure is reported while usage remains visible');
+      check(currentDetail.balance.value===successfulDetail.balance.value&&currentDetail.balanceError.includes('403')&&$('detailBody').textContent.includes('已保留'),'partial balance failure retains the known balance and marks it as saved data');
       window.relay={...successfulApi,inspect:async input=>({ok:true,data:{...successfulActive,id:input.id,usage:null,usageError:'HTTP 502：站点暂时不可用'}})};
       document.querySelector('[data-id="'+activeId+'"] [data-action=refresh]').click();await waitFor(()=>!pending.size,'sidebar manual failure completes');
       check($('toast').textContent.includes(state.providers.find(p=>p.id===activeId).name)&&$('toast').textContent.includes('502'),'sidebar manual refresh also reports failures for its relay');
@@ -243,8 +252,12 @@
   cache.set(summaryRelay.id+':7',{...savedSevenDay,at:new Date(Date.now()+1000).toISOString(),balance:{value:9.99}});renderProviders();
   check(document.querySelector('[data-id="'+summaryRelay.id+'"] .provider-subtitle').textContent==='余额 9.99 USD','seven-day refresh updates the sidebar balance even when an older daily cache exists');
   cache.set(summaryRelay.id+':7',savedSevenDay);renderProviders();
-  cache.delete(summaryRelay.id+':7');hydrateDetails();
+  cache.delete(summaryRelay.id+':7');
+  const legacySnapshots=JSON.parse(localStorage.getItem(detailStorageKey));
+  legacySnapshots.find(r=>r.id===summaryRelay.id&&r.period==='7').history=[{unused:'legacy history'}];
+  localStorage.setItem(detailStorageKey,JSON.stringify(legacySnapshots));hydrateDetails(true);
   check(matchingCache(summaryRelay.id,'7')?.at===savedSevenDay.at,'seven-day detail cache survives hydration');
+  check(!('history' in matchingCache(summaryRelay.id,'7'))&&!JSON.parse(localStorage.getItem(detailStorageKey)).some(r=>'history' in r),'legacy snapshots discard unused response histories');
   setState(await call('switchProvider',{id:summaryRelay.id}));
   const beforeScheduled=capabilityQueries.length;await refreshAll();
   check(JSON.stringify(capabilityQueries.slice(beforeScheduled).map(q=>[q.id,q.period]))===JSON.stringify([[summaryRelay.id,'today'],[summaryRelay.id,'7']])&&currentDetail.period==='7','scheduled refresh preserves the manually selected seven-day view');
@@ -278,6 +291,26 @@
   await detailViewSave;
   const hostViews=await call('detailViewState');
   check(hostViews[logRelay.id].period===customPeriod&&hostViews[logRelay.id].model==='gpt-codex'&&hostViews[summaryRelay.id].period==='30','host retains each relay selection for the current process');
+  const originalStorageGet=Storage.prototype.getItem;let snapshotReads=0;
+  try{
+    Storage.prototype.getItem=function(key){if(key===detailStorageKey)snapshotReads++;return originalStorageGet.call(this,key);};
+    setState(state);setState(state);hydrateDetails();
+    check(snapshotReads===0,'state changes do not repeatedly parse disk snapshots');
+  }finally{Storage.prototype.getItem=originalStorageGet;}
+  const beforeEviction=capabilityQueries.length;
+  const expectedBalance={id:summaryRelay.id,revision:summaryRelay.revision,period:'30',at:new Date(Date.now()+2000).toISOString(),balance:{value:12.3456}};
+  rememberBalance(expectedBalance);
+  for(let i=0;i<60;i++)cache.set('stress:'+i,{...filteredDetail,usage:{...filteredDetail.usage,padding:String(i).repeat(50000)}});
+  check(cache.size<=24&&cache.serializedBytes<=4*1024*1024&&!cache.has(detailCacheKey(logRelay.id,customPeriod,'gpt-codex')),'response cache evicts old queries within its count and size budgets');
+  renderProviders();
+  check(!document.querySelector('[data-id="'+logRelay.id+'"] .provider-subtitle').textContent.includes('余额未查询'),'eviction retains the sidebar balance summary');
+  check(document.querySelector('[data-id="'+summaryRelay.id+'"] .provider-subtitle').textContent==='余额 12.3456 USD'&&!('usage' in balanceSummaries.get(summaryRelay.id)),'latest balance from another date range survives detail eviction as a small summary');
+  balanceSummaries.delete(summaryRelay.id);
+  await openDetails(logRelay.id);
+  check(rangePeriod===customPeriod&&$('modelFilter').value==='gpt-codex'&&chartGranularity==='day'&&hiddenSeries.has('plain')&&!currentDetail,'eviction preserves every relay filter while waiting for explicit refresh');
+  check(capabilityQueries.length===beforeEviction,'cache eviction never triggers selection requests');
+  for(const key of cache.keys())if(key.startsWith('stress:'))cache.delete(key);
+  hydrateDetails(true);
   detailViews.clear();await call('detailViewState',{});restoreDetailView(detailId);renderDetail(selectedCache());
   }finally{window.relay=capabilityApi;setState(await call('switchProvider',{id:activeBeforeCapabilityCheck}));}
   await openDetails(selectedBeforeCapabilityCheck);

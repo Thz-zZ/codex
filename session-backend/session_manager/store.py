@@ -463,11 +463,11 @@ class PreviewReader:
             if journals:
                 # The current journal can extend beyond the official API's DB
                 # projection. Read the prefix and journal as one paged transcript.
-                ids = []
+                ids = set()
                 history = db_file(self.home, "thread_history")
                 if history:
                     with connect_readonly(history) as con:
-                        ids = [r[0] for r in con.execute("SELECT item_id FROM thread_items WHERE thread_id=?", (session.id,))]
+                        ids = {r[0] for r in con.execute("SELECT item_id FROM thread_items WHERE thread_id=?", (session.id,))}
                 return self._journal(session, {"backend": "journal", "paths": journals,
                     "stage": "db" if ids else "files", "db_cursor": None,
                     "index": 0, "file_cursor": None, "seen": ids})
@@ -502,7 +502,7 @@ class PreviewReader:
                 state["stage"] = "files"
             return PreviewPage(page.messages, state, "对话记录", page.notice)
         path = Path(state["paths"][state["index"]])
-        seen = set(state["seen"])
+        seen, added = state["seen"], set()
         inner = state["file_cursor"] or {"offset": 0, "strategy": "completed"}
         messages, bad, count = [], 0, 0
         with open_rollout(path) as f:
@@ -519,10 +519,10 @@ class PreviewReader:
                         continue
                     item = payload.get("item", {})
                     ident = item.get("id")
-                    if ident and ident in seen:
+                    if ident and (ident in seen or ident in added):
                         continue
                     if ident:
-                        seen.add(ident)
+                        added.add(ident)
                     message = decode_item(item, timestamp(payload.get("started_at_ms") or event.get("timestamp")))
                     if message:
                         messages.append(message)
@@ -530,7 +530,9 @@ class PreviewReader:
                     bad += 1
             position = f.tell()
             more = bool(f.read(1))
-        state["seen"] = list(seen)
+        # Commit only after a successful read, so an I/O failure can retry the
+        # same cursor. The active preview shares one set across all its pages.
+        seen.update(added)
         state["file_cursor"] = {"offset": position}
         if not more:
             state["index"] += 1
