@@ -12,7 +12,7 @@
 
 ## 版本与应用打包
 
-当前版本为 **v1.1.7**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
+当前版本为 **v1.1.8**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
 
 运行 `build-release.ps1` 生成可直接运行的 Windows x64 应用文件夹。可通过 `-OutputDirectory` 指定新输出目录。发布包包含应用与会话服务 EXE、DLL、界面、许可、会话管理说明及版本记录。
 

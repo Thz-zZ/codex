@@ -21,14 +21,15 @@ function updateRefreshTime(){
 }
 const adapterLabel=p=>{const type=p.adapter==='auto'?p.detectedAdapter:p.adapter;return (p.adapter==='auto'?'自动 · ':'')+(type==='sub2api'?'Sub2API':type==='newapi'?'NewAPI':'待识别');};
 const balanceText=b=>Number.isFinite(b?.value)?b.value.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4}):'—';
-let state={providers:[],history:[],config:{}},page='providers',detailId=null,detailEpoch=0,auto=true,nextRefresh=Date.now()+60000,allBusy=false,toastTimer,editorEpoch=0,siteFollowsBase=true,rangePeriod='today',draggedId=null,reorderBusy=false,currentDetail=null,chartGranularity='auto',detectEpoch=0;
+let state={providers:[],history:[],config:{}},page='providers',detailId=null,detailEpoch=0,auto=true,nextRefresh=Date.now()+60000,allBusy=false,toastTimer,editorEpoch=0,siteFollowsBase=true,rangePeriod='today',rangeIsDefault=true,draggedId=null,reorderBusy=false,currentDetail=null,chartGranularity='auto',detectEpoch=0;
 const cache=new Map(),pending=new Set(),requests=new Map(),hiddenSeries=new Set();
 const detailStorageKey='relay-detail-cache-v1';
-function hydrateDetails(){try{for(const r of JSON.parse(localStorage.getItem(detailStorageKey)||'[]'))if(state.providers.some(p=>p.id===r.id&&p.revision===r.revision)&&r.period==='today'&&r.range?.end===RelayAdapters.range('today').end&&r.usage){const key=r.id+':today',previous=cache.get(key);if(!previous||Date.parse(r.at)>=Date.parse(previous.summary?.checkedAt||previous.checkedAt||previous.at))cache.set(key,r);}}catch{}}
-function persistDetails(){try{const values=[...cache.values()].filter(r=>r.period==='today'&&r.usage&&r.range?.end===RelayAdapters.range('today').end&&state.providers.some(p=>p.id===r.id&&p.revision===r.revision)).sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,6),saved=[];let size=0;for(const r of values){const length=JSON.stringify(r).length;if(length>512000||size+length>2000000)continue;saved.push(r);size+=length;}localStorage.setItem(detailStorageKey,JSON.stringify(saved));}catch{}}
+function hydrateDetails(){try{for(const r of JSON.parse(localStorage.getItem(detailStorageKey)||'[]'))if(state.providers.some(p=>p.id===r.id&&p.revision===r.revision)&&['today','7'].includes(r.period)&&r.range?.end===RelayAdapters.range(r.period).end&&r.usage){const key=r.id+':'+r.period,previous=cache.get(key);if(!previous||Date.parse(r.at)>=Date.parse(previous.summary?.checkedAt||previous.checkedAt||previous.at))cache.set(key,r);}}catch{}}
+function persistDetails(){try{const values=[...cache.values()].filter(r=>['today','7'].includes(r.period)&&r.usage&&r.range?.end===RelayAdapters.range(r.period).end&&state.providers.some(p=>p.id===r.id&&p.revision===r.revision)).sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,6),saved=[];let size=0;for(const r of values){const length=JSON.stringify(r).length;if(length>512000||size+length>2000000)continue;saved.push(r);size+=length;}localStorage.setItem(detailStorageKey,JSON.stringify(saved));}catch{}}
 const rangeLabel=period=>({today:'今天',yesterday:'昨天','7':'最近 7 天','30':'最近 30 天',all:'全部记录 / 近 90 天'})[period]||(period.startsWith('range:')?period.slice(6).replace(':',' ～ '):period);
 const usageLabel=()=>rangePeriod==='today'?'今日':rangePeriod==='yesterday'?'昨日':'所选日期';
 function matchingCache(id,period=rangePeriod){const value=cache.get(id+':'+period);return value?.revision===state.providers.find(p=>p.id===id)?.revision&&value?.period===period&&value?.range?.end===RelayAdapters.range(period).end?value:null;}
+function defaultPeriod(id){const p=state.providers.find(p=>p.id===id);return (p?.adapter==='auto'?p.detectedAdapter:p?.adapter)==='sub2api'?'7':'today';}
 const filterPickers=new Map();
 function enhanceFilter(id,icon){
   const source=$(id),root=$(id+'Picker'),menuId=id+'Menu',valueId=id+'Value';
@@ -80,7 +81,8 @@ function renderSelectedHeader(){
 function renderState(){
   $('providerCount').textContent=state.providers.length;
   const changed=!state.providers.some(p=>p.id===detailId);
-  if(changed){detailId=(state.providers.find(p=>p.active)||state.providers[0])?.id||null;detailEpoch++;rangePeriod='today';syncRangeControls();}
+  if(changed){detailId=(state.providers.find(p=>p.active)||state.providers[0])?.id||null;detailEpoch++;}
+  if(changed||rangeIsDefault&&currentDetail?.revision!==state.providers.find(p=>p.id===detailId)?.revision){rangePeriod=defaultPeriod(detailId);rangeIsDefault=true;syncRangeControls();}
   $('configPath').textContent=state.config.dir||'';$('dataPath').textContent=state.dataDir||'';
   syncStartupSettings();
   navigate(['settings','sessions'].includes(page)?page:detailId?'details':'providers');
@@ -90,7 +92,8 @@ function renderProviders(){
   if(draggedId)return;
   if(!state.providers.length){$('providerList').innerHTML='<div class="sidebar-empty">还没有中转<br>点击上方添加，或导入当前配置</div>';return;}
   $('providerList').innerHTML=state.providers.map((p,i)=>{
-    const busy=[...pending].some(k=>k.startsWith(p.id+':')),entry=matchingCache(p.id,'today'),snapshot=entry?.summary||entry,balance=snapshot?.balance;
+    const busy=[...pending].some(k=>k.startsWith(p.id+':')),today=matchingCache(p.id,'today'),week=matchingCache(p.id,'7');
+    const entry=week&&(!today||Date.parse(week.at)>Date.parse(today.summary?.checkedAt||today.checkedAt||today.at))?week:today,snapshot=entry?.summary||entry,balance=snapshot?.balance;
     const balanceLabel=Number.isFinite(balance?.value)?`余额 ${balanceText(balance)} USD`:busy&&!entry?'正在查询余额':balance?.message?'余额暂不可用':'余额未查询';
     const balanceClass=Number.isFinite(balance?.value)?(balance.value<0?' negative':' positive'):'';
     return `<article class="provider-card${p.active?' active':''}${page==='details'&&p.id===detailId?' is-viewing':''}" data-id="${esc(p.id)}"><button class="drag-handle" data-tooltip="拖动排序；Alt + ↑ / ↓ 也可移动" aria-label="拖动排序 ${esc(p.name)}"${reorderBusy?' disabled':''}><svg viewBox="0 0 16 24" width="11" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="6" r="1.3"/><circle cx="11" cy="6" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/><circle cx="5" cy="18" r="1.3"/><circle cx="11" cy="18" r="1.3"/></svg></button><button class="provider-select" data-action="details" aria-current="${page==='details'&&p.id===detailId?'true':'false'}" aria-label="查看 ${esc(p.name)} 的余额与用量"><span class="avatar tone-${i%4}">${esc(p.name.slice(0,1))}</span><span class="provider-info"><span class="provider-title"><strong data-tooltip="${esc(p.name)}">${esc(p.name)}</strong>${p.active?'<span class="badge live">使用中</span>':''}</span><span class="provider-subtitle${balanceClass}" data-tooltip="${esc(balance?.message||balance?.source||balanceLabel)}">${esc(balanceLabel)}</span></span></button><button class="icon-button refresh-provider" data-action="refresh" data-tooltip="刷新${esc(p.name)}今天的余额与用量" aria-label="刷新${esc(p.name)}"${busy?' disabled aria-busy="true"':''}>↻</button></article>`;
@@ -149,8 +152,11 @@ function renderDetail(r,loading=false){
   if(r.usageError)html+=`<div class="notice error">记录查询失败：${esc(r.usageError)}</div>`;
   html+=`<div class="detail-meta"><strong>用量分析 <small>${esc(rangeLabel(rangePeriod))}</small></strong></div>`;
   if(u)html+=`<div class="notice">${esc(u.note)} ${esc(u.costNote||'')}</div>`;
-  if(u){html+=`<div class="analytics-grid analytics-wide"><section class="chart-card"><div class="chart-heading"><h2>Token 使用趋势</h2><div class="grain-control" role="group" aria-label="趋势粒度"><button data-grain="auto" aria-pressed="true">自动</button><button data-grain="hour" aria-pressed="false">按时</button><button data-grain="day" aria-pressed="false">按天</button></div></div><div id="trendChart"></div></section></div>`;
-    html+=tableCard('近期请求',['时间','模型','输入 Token','输出 Token','缓存读取','缓存写入','缓存率'],u.logs.map(l=>[l.timestamp?esc(new Date(l.timestamp*1000).toLocaleString('zh-CN',{hour12:false})):'—',esc(l.model),fmt(l.input),fmt(l.output),fmt(l.read),fmt(l.write),`<span class="rate-cell" data-tooltip="${esc(l.reason||'')}">${rate(l.rate)}</span>`]),u.mode==='summary'?'Sub2API 接口仅返回汇总，不提供逐条请求。':'暂无近期请求。');}
+  if(u){
+    const grainControl=u.mode==='logs'?'<div class="grain-control" role="group" aria-label="趋势粒度"><button data-grain="auto" aria-pressed="true">自动</button><button data-grain="hour" aria-pressed="false">按时</button><button data-grain="day" aria-pressed="false">按天</button></div>':'';
+    html+=`<div class="analytics-grid analytics-wide"><section class="chart-card"><div class="chart-heading"><h2>Token 使用趋势</h2>${grainControl}</div><div id="trendChart"></div></section></div>`;
+    if(u.mode==='logs')html+=tableCard('近期请求',['时间','模型','输入 Token','输出 Token','缓存读取','缓存写入','缓存率'],u.logs.map(l=>[l.timestamp?esc(new Date(l.timestamp*1000).toLocaleString('zh-CN',{hour12:false})):'—',esc(l.model),fmt(l.input),fmt(l.output),fmt(l.read),fmt(l.write),`<span class="rate-cell" data-tooltip="${esc(l.reason||'')}">${rate(l.rate)}</span>`]),'暂无近期请求。');
+  }
   if(!u)html+='<div class="detail-placeholder"><span class="secure-dot"></span> 已显示上次保存的数据，点击刷新可加载完整用量与趋势。</div>';
   $('detailBody').innerHTML=html;renderCharts();syncRefreshControls();
 }
@@ -161,14 +167,14 @@ async function fetchProvider(id,period=rangePeriod,model='all'){
 }
 async function refreshAll(){
   if(allBusy)return;allBusy=true;let failures=0;const ids=state.providers.filter(p=>p.active).map(p=>p.id),requestedPeriod='today';
-  const worker=async()=>{while(ids.length){const id=ids.shift();try{await fetchProvider(id,requestedPeriod);}catch{failures++;}}};
-  try{await Promise.all([worker(),worker()]);if(page==='details'&&rangePeriod==='today'&&$('modelFilter').value==='all'&&state.providers.find(p=>p.id===detailId)?.active)renderDetail(matchingCache(detailId)||currentDetail);if(failures)toast(`${failures} 个中转查询失败，请手动重试。`,true);}finally{allBusy=false;nextRefresh=Date.now()+60000;syncRefreshControls();}
+  const worker=async()=>{while(ids.length){const id=ids.shift();try{await fetchProvider(id,requestedPeriod);if(page==='details'&&detailId===id&&state.providers.find(p=>p.id===id)?.active){if(rangeIsDefault&&defaultPeriod(id)==='7'&&rangePeriod==='today'){rangePeriod='7';syncRangeControls();}if(rangePeriod==='7')await fetchProvider(id,'7');}}catch{failures++;}}};
+  try{await Promise.all([worker(),worker()]);if(page==='details'&&['today','7'].includes(rangePeriod)&&$('modelFilter').value==='all'&&state.providers.find(p=>p.id===detailId)?.active)renderDetail(matchingCache(detailId)||currentDetail);if(failures)toast(`${failures} 个中转查询失败，请手动重试。`,true);}finally{allBusy=false;nextRefresh=Date.now()+60000;syncRefreshControls();}
 
 }
 async function openDetails(id){
   if(!state.providers.some(p=>p.id===id))return;
   const changed=detailId!==id;detailId=id;detailEpoch++;
-  if(changed){rangePeriod='today';syncRangeControls();chartGranularity='auto';hiddenSeries.clear();}
+  if(changed){rangePeriod=defaultPeriod(id);rangeIsDefault=true;syncRangeControls();chartGranularity='auto';hiddenSeries.clear();}
   $('modelFilter').innerHTML='<option value="all">全部模型</option>';filterPickers.get('modelFilter')?.sync();
   $('refreshDetail').disabled=[...pending].some(key=>key.startsWith(id+':'));navigate('details');
   const saved=matchingCache(id);renderDetail(saved||null);
@@ -181,8 +187,8 @@ function reportRefreshFailure(id,result){
   else if(!Number.isFinite(result.balance?.value))toast(`${name} 余额刷新失败：${result.balance?.message||'接口未返回账户余额。'}`,true);
 }
 async function refreshDetails(notifyFailure=true){
-  if(!detailId)return;const id=detailId,epoch=++detailEpoch,period=$('period').value,model=$('modelFilter').value;$('refreshDetail').disabled=true;if(!currentDetail)renderDetail(null,true);
-  try{const result=await fetchProvider(id,period,model);if(result&&notifyFailure)reportRefreshFailure(id,result);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod){renderSelectedHeader();renderDetail(result);}}catch(e){if(notifyFailure||epoch===detailEpoch)toast(`${state.providers.find(p=>p.id===id)?.name||'中转'} 刷新失败：${e.message}`,true);if(epoch===detailEpoch){const saved=matchingCache(id);if(saved)renderDetail(saved);else $('detailBody').innerHTML=`<div class="notice error">${esc(e.message)}</div>`;}}finally{if(epoch===detailEpoch)$('refreshDetail').disabled=false;nextRefresh=Date.now()+60000;}
+  if(!detailId)return;const id=detailId,epoch=++detailEpoch,model=$('modelFilter').value;let period=$('period').value;$('refreshDetail').disabled=true;if(!currentDetail)renderDetail(null,true);
+  try{let result=await fetchProvider(id,period,model);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod&&rangeIsDefault&&period==='today'&&result.usage?.mode==='summary'){period=rangePeriod='7';syncRangeControls();result=await fetchProvider(id,period,model);}if(result&&notifyFailure)reportRefreshFailure(id,result);if(result&&detailId===id&&epoch===detailEpoch&&period===rangePeriod){renderSelectedHeader();renderDetail(result);}}catch(e){if(notifyFailure||epoch===detailEpoch)toast(`${state.providers.find(p=>p.id===id)?.name||'中转'} 刷新失败：${e.message}`,true);if(epoch===detailEpoch){const saved=matchingCache(id);if(saved)renderDetail(saved);else $('detailBody').innerHTML=`<div class="notice error">${esc(e.message)}</div>`;}}finally{if(epoch===detailEpoch)$('refreshDetail').disabled=false;nextRefresh=Date.now()+60000;}
 }
 window.openDetails=openDetails;window.refreshDetails=refreshDetails;
 document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{detailEpoch++;navigate(b.dataset.nav);}));
@@ -212,7 +218,7 @@ async function handleProviderAction(e){
 $('providerList').addEventListener('click',handleProviderAction);
 $('detailActions').addEventListener('click',handleProviderAction);
 function syncRangeControls(){const source=$('period');source.querySelectorAll('[data-custom-range]').forEach(o=>o.remove());if(rangePeriod.startsWith('range:')){const option=new Option(rangeLabel(rangePeriod),rangePeriod);option.dataset.customRange='true';source.insertBefore(option,source.querySelector('[value=custom]'));}source.value=rangePeriod;filterPickers.get('period')?.sync();}
-async function applyRange(period){RelayAdapters.range(period);rangePeriod=period;syncRangeControls();detailEpoch++;renderProviders();if(page==='details'){renderDetail(matchingCache(detailId)||null);await refreshDetails();}else await refreshAll();}
+async function applyRange(period){RelayAdapters.range(period);rangePeriod=period;rangeIsDefault=false;syncRangeControls();detailEpoch++;renderProviders();if(page==='details'){renderDetail(matchingCache(detailId)||null);await refreshDetails();}else await refreshAll();}
 function cancelDateSelection(){$('dateDialog').close();syncRangeControls();}
 function onRangeChange(event){if(event.target.value==='custom'){const current=RelayAdapters.range(rangePeriod),today=RelayAdapters.day(Date.now()/1000);$('dateStart').max=$('dateEnd').max=today;$('dateStart').value=current.start;$('dateEnd').value=current.end;$('dateError').textContent='';$('dateDialog').showModal();}else applyRange(event.target.value).catch(e=>toast(e.message,true));}
 $('dateForm').addEventListener('submit',async event=>{event.preventDefault();try{const period='range:'+$('dateStart').value+':'+$('dateEnd').value;RelayAdapters.range(period);$('dateDialog').close();await applyRange(period);}catch(e){$('dateError').textContent=e.message;}});

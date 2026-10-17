@@ -35,6 +35,10 @@ internal static class DraftUiSmoke {
                 await core.ExecuteScriptAsync("openDetails(state.providers.find(p=>!p.active).id)");
                 await Task.Delay(180);
                 using(var inactivePreview=File.Create(Path.Combine(dir,"workspace-inactive.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,inactivePreview);
+                await core.ExecuteScriptAsync("window.summaryPreviewPrevious=detailId;openDetails(state.providers.find(p=>p.adapter==='sub2api').id);document.querySelector('main').scrollTop=0;");
+                await Task.Delay(100);
+                using(var summaryPreview=File.Create(Path.Combine(dir,"sub2api-summary.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,summaryPreview);
+                await core.ExecuteScriptAsync("openDetails(window.summaryPreviewPrevious);");
                 return;
             }
             await Task.Delay(50);

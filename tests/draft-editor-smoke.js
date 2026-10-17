@@ -126,7 +126,7 @@
   setState(await call('switchProvider',{id:switchId}));check(state.providers[0].id===switchId,'applied relay moves to first');
   setState(await call('state'));check(state.providers[0].id===switchId,'first position persists');
   setState(await call('switchProvider',{id:activeId}));
-  const others=state.providers.filter(p=>p.id!==activeId);
+  const others=state.providers.filter(p=>p.id!==activeId).sort((a,b)=>Number(a.adapter==='sub2api')-Number(b.adapter==='sub2api'));
   const before=await Promise.all(others.map(p=>call('snapshots',{id:p.id})));
   await refreshAll();
   const after=await Promise.all(others.map(p=>call('snapshots',{id:p.id})));
@@ -224,5 +224,38 @@
     check(JSON.stringify(automaticIds)===JSON.stringify([activeId])&&detailId===other.id,'timer refreshes only applied relay and preserves viewed relay');
     check($('detailRefreshTime').textContent.startsWith('上次刷新：'+dateTime(currentDetail.at)+' · ')&&!$('refreshCountdown')&&!$('detailCountdown'),'automatic tick updates age without restoring countdown or relay status text');
   }finally{window.relay=originalApi;navigate('providers');}
-  window.draftSmokeResult={ok:true,modelDiscovery:true,searchableModelPicker:true,chosenModelSaved:true,staleModelsDiscarded:true,manualModelPreserved:true,requiredFieldsClear:true,appliedRelayFirst:true,manualConnectionTest:true,noAutomaticDraftRequests:true,noBalanceSync:true,fieldErrors:true,persistentCacheHydration:true,freshCacheAvoidsFetch:true,noRefreshOnSelection:true,noRefreshOnApply:true,rightToolbarRefreshControls:true,relativeRefreshTime:true,refreshFailureFeedback:true,pausedManualRefresh:true,activeOnlyTimer:true,localQueryHistoryRemoved:true,keepsAutomaticSelection:true,manualTypePreserved:true,blankSiteSaves:true,staleDraftDiscarded:true,listDateRemoved:true,activeOnlyRefresh:true,individualRefresh:true,loginStartupSetting:true,startupRepeatedClicks:true,startupSaveFailureRecovery:true,silentStartupSetting:true,silentRequiresLoginStartup:true};
+  const selectedBeforeCapabilityCheck=detailId;
+  const summaryRelay=state.providers.find(p=>p.adapter==='sub2api'),logRelay=state.providers.find(p=>p.adapter==='newapi'),capabilityApi=window.relay,capabilityQueries=[];
+  const activeBeforeCapabilityCheck=state.providers.find(p=>p.active).id;
+  window.relay={...capabilityApi,inspect:input=>{capabilityQueries.push(input);return capabilityApi.inspect(input);}};
+  try{
+  await openDetails(summaryRelay.id);
+  check(rangePeriod==='7'&&$('period').value==='7'&&$('periodValue').textContent==='最近 7 天'&&capabilityQueries.length===0,'Sub2API defaults to seven days without querying on selection');
+  await refreshDetails();
+  check(capabilityQueries.length===1&&capabilityQueries[0].period==='7'&&currentDetail.period==='7','manual refresh uses the default seven-day range');
+  check(currentDetail.usage.mode==='summary'&&!document.querySelector('[data-grain]')&&!$('detailBody').textContent.includes('近期请求'),'Sub2API summary omits unavailable hourly controls and request section');
+  check(document.querySelectorAll('.metric-card').length===4&&Boolean(document.querySelector('#trendChart svg')),'Sub2API retains summary metrics and daily trend');
+  const savedSevenDay=currentDetail;
+  cache.set(summaryRelay.id+':7',{...savedSevenDay,at:new Date(Date.now()+1000).toISOString(),balance:{value:9.99}});renderProviders();
+  check(document.querySelector('[data-id="'+summaryRelay.id+'"] .provider-subtitle').textContent==='余额 9.99 USD','seven-day refresh updates the sidebar balance even when an older daily cache exists');
+  cache.set(summaryRelay.id+':7',savedSevenDay);renderProviders();
+  cache.delete(summaryRelay.id+':7');hydrateDetails();
+  check(matchingCache(summaryRelay.id,'7')?.at===savedSevenDay.at,'seven-day detail cache survives hydration');
+  setState(await call('switchProvider',{id:summaryRelay.id}));
+  const beforeScheduled=capabilityQueries.length;await refreshAll();
+  check(JSON.stringify(capabilityQueries.slice(beforeScheduled).map(q=>[q.id,q.period]))===JSON.stringify([[summaryRelay.id,'today'],[summaryRelay.id,'7']])&&currentDetail.period==='7','scheduled refresh updates the applied seven-day view and daily sidebar summary');
+  currentDetail=null;detailId=null;setState(await call('state'));
+  check(detailId===summaryRelay.id&&rangePeriod==='7'&&currentDetail?.period==='7','startup selects seven days for the applied Sub2API relay using cache');
+  await applyRange('today');
+  check(rangePeriod==='today'&&currentDetail.period==='today'&&!rangeIsDefault,'manual date choice is preserved for summary data');
+  const beforeLogSelection=capabilityQueries.length;await openDetails(logRelay.id);
+  check(rangePeriod==='today'&&$('period').value==='today'&&capabilityQueries.length===beforeLogSelection,'NewAPI defaults to today without querying on selection');
+  await refreshDetails();
+  check(currentDetail.usage.mode==='logs'&&document.querySelectorAll('[data-grain]').length===3&&$('detailBody').querySelector('tbody tr'),'NewAPI keeps granularity controls and request records after switching back');
+  const beforeSummarySelection=capabilityQueries.length;await openDetails(summaryRelay.id);
+  check(rangePeriod==='7'&&currentDetail.period==='7'&&capabilityQueries.length===beforeSummarySelection,'reselecting Sub2API restores seven-day defaults from cache without querying');
+  }finally{window.relay=capabilityApi;setState(await call('switchProvider',{id:activeBeforeCapabilityCheck}));}
+  await openDetails(selectedBeforeCapabilityCheck);
+  check(defaultPeriod(summaryRelay.id)==='7'&&defaultPeriod(logRelay.id)==='today','default range follows each relay type');
+  window.draftSmokeResult={ok:true,summaryOnlyPresentation:true,logControlsPreserved:true,modelDiscovery:true,searchableModelPicker:true,chosenModelSaved:true,staleModelsDiscarded:true,manualModelPreserved:true,requiredFieldsClear:true,appliedRelayFirst:true,manualConnectionTest:true,noAutomaticDraftRequests:true,noBalanceSync:true,fieldErrors:true,persistentCacheHydration:true,freshCacheAvoidsFetch:true,noRefreshOnSelection:true,noRefreshOnApply:true,rightToolbarRefreshControls:true,relativeRefreshTime:true,refreshFailureFeedback:true,pausedManualRefresh:true,activeOnlyTimer:true,localQueryHistoryRemoved:true,keepsAutomaticSelection:true,manualTypePreserved:true,blankSiteSaves:true,staleDraftDiscarded:true,listDateRemoved:true,activeOnlyRefresh:true,individualRefresh:true,loginStartupSetting:true,startupRepeatedClicks:true,startupSaveFailureRecovery:true,silentStartupSetting:true,silentRequiresLoginStartup:true};
 })().catch(error=>{window.draftSmokeResult={ok:false,error:String(error.stack||error)};});
