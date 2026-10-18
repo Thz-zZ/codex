@@ -43,6 +43,7 @@ internal sealed partial class MainForm {
             if(restarted.Any(p=>!p.HasExited))throw J.Error("Restarted session service was not released.");
             J.Atomic(Path.Combine(qaDir,"memory-result.json"),J.Encode(J.Map("ok",true,"initialSessionProcesses",original.Count,"traySessionProcessesExited",true,"lazySessionRestart",true,"reuseDuringRelease",true,"cacheEntriesLimit",24,"cacheSerializedBytesLimit",4*1024*1024)));
         }finally{foreach(var process in original.Concat(restarted))process.Dispose();}
+        await CheckTrayWindowSmoke();
     }
 }
 }

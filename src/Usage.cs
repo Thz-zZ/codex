@@ -62,21 +62,21 @@ internal static class Usage {
         string root=Root(p);if(adapter=="newapi")return root+"/api/log/token";
         return root+"/v1/usage?start_date="+J.Str(range,"start")+"&end_date="+J.Str(range,"end")+"&days="+J.Str(range,"days")+"&timezone=Asia%2FShanghai";
     }
-    static async Task<object> Get(string url,string key,string userId="") {
+    static async Task<object> Get(string url,string key,string userId="",string protocol="responses") {
         // Retry an interrupted GET once, sharing the original deadline across both attempts.
         using(var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(12))){
-            for(int attempt=0;;attempt++)try{return await GetOnce(url,key,userId,timeout.Token).ConfigureAwait(false);}
+            for(int attempt=0;;attempt++)try{return await GetOnce(url,key,userId,timeout.Token,protocol).ConfigureAwait(false);}
             catch(Exception ex) when(attempt==0&&!timeout.IsCancellationRequested&&RetryConnection(ex)){
                 await Task.Delay(200,timeout.Token).ConfigureAwait(false);
             }
             catch(Exception ex) when(timeout.IsCancellationRequested){throw new OperationCanceledException("请求超时。",ex,timeout.Token);}
         }
     }
-    static async Task<object> GetOnce(string url,string key,string userId,CancellationToken cancellation) {
+    static async Task<object> GetOnce(string url,string key,string userId,CancellationToken cancellation,string protocol) {
         if(FetchOverride!=null)return await FetchOverride(url,key,userId).ConfigureAwait(false);
         using(var request=new HttpRequestMessage(HttpMethod.Get,url)) {
             request.Headers.TryAddWithoutValidation("Accept","application/json");
-            if(key!="")request.Headers.TryAddWithoutValidation("Authorization","Bearer "+key);
+            if(key!="")ModelProtocol.Authenticate(request,protocol,key);
             if(userId!="")request.Headers.TryAddWithoutValidation("New-Api-User",userId);
             using(var response=await Http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,cancellation).ConfigureAwait(false))
             using(cancellation.Register(()=>response.Dispose())) {
@@ -104,7 +104,7 @@ internal static class Usage {
         var p=Unwrap(payload);return J.Get(p,"model_stats") is System.Collections.IList||J.Get(p,"daily_usage") is System.Collections.IList||J.Get(J.Get(p,"usage"),"today")!=null||J.Get(J.Get(p,"usage"),"total")!=null||new[]{"unrestricted","quota_limited"}.Contains(J.Str(p,"mode"))&&(J.Num(p,"balance").HasValue||J.Get(p,"quota") is Dictionary<string,object>);
     }
     static bool IsNewToken(object payload) {var p=Unwrap(payload);return J.Str(p,"object")=="token_usage"||J.Get(p,"unlimited_quota") is bool&&J.Num(p,"total_available").HasValue;}
-    internal static Task<object> GetForTest(string url,string key,string user=""){return Get(url,key,user);}
+    internal static Task<object> GetForTest(string url,string key,string user="",string protocol="responses"){return Get(url,key,user,protocol);}
     internal static bool ValidTestPayload(string type,object payload){if(type=="sub2api")return IsSub(payload);try{Unpack(payload);return true;}catch{return false;}}
     internal static bool ValidTokenPayload(object payload){return IsNewToken(payload);}
     public static async Task<object> DetectAdapter(object input) {
@@ -222,6 +222,7 @@ internal static class Usage {
     }
     public static async Task<object> Inspect(Store store,string id,string period,string model="all") {
         var range=Range(period);var p=store.Details(id);string key=J.Str(p,"key"),account=J.Str(p,"accountKey"),choice=J.Str(p,"adapter","auto"),preferred=J.Str(p,"detectedAdapter","newapi");
+        if(choice=="none")return J.Map("id",id,"at",J.Now(),"period",period,"model",model,"range",range,"revision",J.Str(p,"revision"),"bridgeUsage",J.Get(p,"bridgeUsage"),"adapter","none","usage",null,"usageError","","balance",J.Map("value",null,"label","账户余额","message","未启用统计查询；模型调用可正常使用。"));
         string[] types=choice=="auto"?new[]{preferred,preferred=="newapi"?"sub2api":"newapi"}:new[]{choice};string detected=null,error="";object payload=null,usage=null,balance=null;var errors=new List<string>();bool stopped=false,transportFailed=false;
         foreach(string type in types) {
             try {var result=await Get(Endpoint(p,type,range),key);if(type=="newapi")Unpack(result);else if(!IsSub(result))throw J.Error("返回的数据不是 Sub2API 用量格式。");payload=result;detected=type;break;}
@@ -247,7 +248,7 @@ internal static class Usage {
         store.RequireRevision(id,J.Str(p,"revision"));string at=J.Now();error=Sanitize(error,key,account);
         store.Record(id,J.Map("at",at,"period",period,"model",model,"adapter",effective==""?null:effective,"balance",balance,"totals",J.Get(usage,"totals"),"error",error));
         var inspection=J.Map("id",id,"at",at,"period",period,"model",model,"range",range,"revision",J.Str(p,"revision"),"adapter",effective==""?null:effective,"usage",usage,"usageError",error,"balance",balance);
-        inspection["summary"]=UsageCache.Put(store,inspection);return inspection;
+        inspection["summary"]=UsageCache.Put(store,inspection);inspection["bridgeUsage"]=J.Get(store.Details(id),"bridgeUsage");return inspection;
     }
     internal static string ErrorText(Exception error,params string[] secrets){
         var messages=new List<string>();bool timeout=false,tls=false;

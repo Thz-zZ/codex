@@ -29,7 +29,8 @@ Codex Relay Lite v$relayVersion
 
 支持 Windows x64，使用 .NET Framework 4.8 和 Microsoft Edge WebView2 Runtime。
 中转与加密密钥沿用本机 Codex Relay Lite 数据目录。
-关闭窗口会收起到托盘；完全退出请右键托盘图标选择“退出”。
+关闭窗口会收起到托盘，后台中转继续运行；重开保留原页面、筛选和未保存草稿，不重新加载。
+完全退出请右键托盘图标选择“退出”。
 “设置 → 软件更新”可检查、下载并重启安装新版，默认在启动时及每 6 小时检查。
 
 “会话管理”位于左侧“设置”下方，详细用法见“会话管理说明.md”。

@@ -19,6 +19,8 @@
   const selectedRelay=state.providers.find(p=>p.id===detailId),selectedListEntry=matchingCache(detailId,'today'),selectedBalance=selectedListEntry?.summary?.balance||selectedListEntry?.balance;
   check(document.querySelector('[data-id="'+detailId+'"] .provider-subtitle').textContent===`余额 ${balanceText(selectedBalance)} USD`,'left relay row displays cached balance instead of automatic API label');
   check(document.querySelector('#importCurrent').getAttribute('aria-label')==='导入当前 Codex 配置'&&Boolean(document.querySelector('#importCurrent svg')),'import action has a recognizable icon and label');
+  $('importCurrent').focus();const importStyle=getComputedStyle($('importCurrent'));
+  check(importStyle.outlineStyle==='none'&&importStyle.borderTopWidth==='0px'&&importStyle.boxShadow==='none'&&importStyle.backgroundColor==='rgba(0, 0, 0, 0)','import action stays frameless when focused without removing its icon or keyboard access');
   check(Boolean($('launchAtLogin')&&$('silentStartup')),'startup preferences shown in settings');
   const initialSettings={...state.appSettings};
   const changeStartup=async(key,value)=>{
@@ -50,22 +52,78 @@
   const relayApi=window.relay;let connectionCalls=0,editorInspects=0,modelCalls=0;
   window.relay={...relayApi,listModels:input=>{modelCalls++;return relayApi.listModels(input);},testConnection:input=>{connectionCalls++;return relayApi.testConnection(input);},inspect:input=>{editorInspects++;return relayApi.inspect(input);}};
   await openEditor();
+  check(Array.from($('providerPreset').options).some(option=>option.value==='codex'&&option.textContent==='Codex'),'Codex replaces the ambiguous custom relay label');
+  check(['providerPreset','protocol','modelName','reasoning'].every(id=>$(id).required&&$(id).value===''),'all four required selections start empty');
+  check(['providerPreset','protocol','reasoning'].every(id=>$(id+'Value').textContent.startsWith('请选择')&&$(id+'Picker').classList.contains('is-required-empty')&&$(id+'Picker').querySelector('button').getAttribute('aria-required')==='true'),'empty selectors visibly request an explicit selection from the outset');
+  check($('modelName').classList.contains('is-required-empty')&&$('modelName').placeholder.includes('选择默认模型'),'default model is visibly empty and required without submitting');
+  check($('baseUrl').value===''&&$('adapter').value==='auto','all model families start with a manually configured relay');
+  check(Array.from($('providerPreset').options).every(option=>!option.textContent.includes('官方')),'model family choices are not official API presets');
+  $('providerName').value='我的共用中转';$('baseUrl').value='https://fixture-shared.example/v1';$('apiKey').value='shared-relay-key';$('adapter').value='sub2api';
+  $('siteUrl').value='https://fixture-shared-stats.example';siteFollowsBase=false;$('accountKey').value='shared-account-key';$('accountUserId').value='321';$('quotaPerUnit').value='250000';$('modelName').value='relay-aliased-model';
+  for(const [preset,protocol] of [['deepseek','chat-completions'],['qwen','chat-completions'],['glm','chat-completions'],['gemini','chat-completions'],['grok','chat-completions'],['claude','anthropic']]){
+    $('reasoning').value='high';
+    const previousProtocol=$('protocol').value;$('providerPreset').value=preset;$('providerPreset').dispatchEvent(new Event('change',{bubbles:true}));
+    check($('protocol').value===previousProtocol,'choosing a family never auto-selects a protocol: '+preset);
+    $('protocol').value=protocol;$('protocol').dispatchEvent(new Event('change',{bubbles:true}));
+    check($('baseUrl').value==='https://fixture-shared.example/v1'&&$('apiKey').value==='shared-relay-key'&&$('providerName').value==='我的共用中转','switching model families preserves the relay address, key and custom name: '+preset);
+    check($('adapter').value==='sub2api'&&$('siteUrl').value==='https://fixture-shared-stats.example'&&$('accountKey').value==='shared-account-key'&&$('accountUserId').value==='321'&&$('quotaPerUnit').value==='250000'&&!$('clearAccount').checked&&!siteFollowsBase,'switching model families preserves relay statistics and account configuration');
+    check($('protocol').value===protocol&&$('modelName').required&&$('modelName').value==='relay-aliased-model','manual protocol selection does not rewrite a relay model ID');
+    check($('protocolHelp').textContent.includes('托盘')&&$('protocolHelp').textContent.includes('中转站'),'relay protocol and bridge lifetime are explained');
+    check(document.querySelector('label[for="modelName"] .field-tag.required').textContent==='必选'&&$('modelHelp').textContent.includes('不锁定模型'),'default-only selection and full Codex catalog are explicit in the editor');
+  }
+  check($('reasoning').required&&$('reasoning').value==='high'&&$('reasoning').validity.valid,'Claude retains an explicitly selected supported high effort');
+  check(Array.from($('reasoning').options).every(option=>option.disabled===(!option.value||['xhigh','max','ultra'].includes(option.value))),'Claude permits default and native low/medium/high without inventing mappings');
+  check($('reasoningHelp').textContent.includes('output_config.effort')&&!$('protocolHelp').textContent.includes('缓存'),'native effort remains explained without a protocol-specific cache promise');
+  $('reasoning').value='xhigh';updateProtocolForm();
+  check($('reasoning').value===''&&!$('reasoning').validity.valid,'an unsupported strength requires a new explicit choice');
+  const claudeEffortTrigger=$('reasoningPicker').querySelector('button');claudeEffortTrigger.click();
+  $('reasoningMenu').querySelector('[data-index="1"]').click();check($('reasoning').value==='default','Claude service default can be explicitly selected');
+  claudeEffortTrigger.click();$('reasoningMenu').querySelector('[data-index="5"]').click();check($('reasoning').value==='default','disabled reasoning options cannot be selected with the mouse');
+  claudeEffortTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));claudeEffortTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));check($('reasoning').value==='high','keyboard reaches native high and skips unsupported reasoning options');
+  claudeEffortTrigger.click();$('reasoningMenu').querySelector('[data-index="1"]').click();
+  for(const family of ['codex','claude','grok','deepseek','qwen','glm','gemini']){
+    const preview=document.createElement('div');preview.innerHTML=modelUsageSummary({modelFamily:family,protocol:family==='claude'?'anthropic':family==='codex'?'responses':'chat-completions',model:'fixture-'+family,reasoning:'high'});
+    check(preview.textContent.includes('模型参数')&&preview.textContent.includes('high')&&!preview.textContent.includes('缓存')&&!preview.querySelector('input'),'per-model notices contain parameters, not vendor cache policies or switches');
+  }
+  check($('promptCachePolicy').textContent.includes('全部中转')&&$('promptCachePolicy').textContent.includes('不注入模型专用缓存字段')&&$('promptCachePolicy').textContent.includes('不减少输出 Token')&&!$('promptCachePolicy').querySelector('input'),'one global cache policy explains upstream support and billing without a switch');
+  const diagnostic=document.createElement('div'),diagnosticProvider={protocol:'anthropic',model:'saved-model',reasoning:'high',bridgeUsage:{at:new Date().toISOString(),model:'actual-<model>',reasoning:'medium',status:'completed',cache:{write:12,read:0}}};
+  diagnostic.innerHTML=modelUsageSummary(diagnosticProvider);
+  check(diagnostic.textContent.includes('实际发送 actual-<model> · 强度 medium')&&!diagnostic.textContent.includes('缓存')&&!diagnostic.querySelector('model'),'sent settings remain escaped without the removed per-request cache display');
+  diagnosticProvider.bridgeUsage.cache={};diagnostic.innerHTML=modelUsageSummary(diagnosticProvider);
+  check(!diagnostic.querySelector('.model-usage-counts'),'missing or present counters do not restore the removed per-model cache panel');
+  modelPicker.open(false);check(!modelPicker.options.some(option=>option.id===''),'Claude bridge cannot inherit a Codex model');modelPicker.close();
+  $('providerPreset').value='codex';$('providerPreset').dispatchEvent(new Event('change',{bubbles:true}));
+  check($('baseUrl').value==='https://fixture-shared.example/v1'&&$('protocol').value==='anthropic'&&$('adapter').value==='sub2api'&&$('modelName').required&&$('reasoning').value==='default','switching back to Codex retains the manually chosen protocol and other explicit selections');
+  $('protocol').value='chat-completions';$('protocol').dispatchEvent(new Event('change',{bubbles:true}));
+  $('providerPreset').value='claude';$('providerPreset').dispatchEvent(new Event('change',{bubbles:true}));
+  check($('protocol').value==='chat-completions','a Claude relay may expose a manually selected OpenAI-compatible protocol');
+  closeEditor();await openEditor();check(['providerPreset','protocol','modelName','reasoning'].every(id=>$(id).required&&$(id).value===''),'every fresh entry requires four selections without automatic defaults');
   $('providerName').value='未保存识别测试';$('baseUrl').value='https://fixture-draft.example/v1';$('baseUrl').dispatchEvent(new Event('input',{bubbles:true}));$('apiKey').value='sk-draft-smoke-fake-only';
   check($('providerName').placeholder==='请输入中转名称'&&$('apiKey').required&&$('apiKeyRequirement').textContent==='必填','neutral name and clear required fields');
+  for(const selections of [{modelFamily:''},{protocol:''},{model:''},{reasoning:''}]){
+    const rejected=await window.relay.saveProvider({name:'invalid-selection-fixture',baseUrl:'https://fixture-selection.example/v1',key:'fixture-selection-key',modelFamily:'codex',protocol:'responses',model:'fixture-model',reasoning:'default',...selections});
+    check(!rejected.ok&&(await call('state')).providers.length===count,'save API cannot bypass any of the four mandatory selections');
+  }
   check(modelCalls===0,'model list is fetched only on click');
+  await modelPicker.load();check(modelCalls===0&&$('modelStatus').textContent.includes('选择模型调用协议'),'model discovery cannot fall back to Responses while protocol is empty');
+  $('providerForm').requestSubmit();check($('formError').textContent.includes('模型类型')&&document.activeElement===$('providerPresetPicker').querySelector('button'),'empty family validation focuses the visible required selector');
+  $('providerPreset').value='codex';$('providerPreset').dispatchEvent(new Event('change',{bubbles:true}));
+  $('providerForm').requestSubmit();check($('formError').textContent.includes('调用协议')&&document.activeElement===$('protocolPicker').querySelector('button'),'empty protocol validation focuses the visible selector without auto-selection');
+  $('protocol').value='responses';$('protocol').dispatchEvent(new Event('change',{bubbles:true}));
   await modelPicker.load();check(modelCalls===1&&modelPicker.models.length===3,'models fetched with draft credentials');
   check($('modelName').value==='','fetching does not choose default silently');
   $('modelName').value='mini';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));
-  check(modelPicker.options.length===2,'model list searchable');$('modelMenu').querySelector('[data-model-index="1"]').click();check($('modelName').value==='gpt-codex-mini','dropdown chooses default');
-  $('modelName').value='custom-model';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));$('modelName').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));check($('modelName').value==='custom-model','unlisted model can be entered manually');
-  modelPicker.open(false);$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='','inherit current model option');
-  modelPicker.open(false);$('modelMenu').querySelector('[data-model-index="2"]').click();check($('modelName').value==='gpt-codex-mini','default selected again');
+  check(modelPicker.options.length===1,'model list searchable');$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='gpt-codex-mini','dropdown chooses model');
+  $('providerForm').requestSubmit();check($('providerDialog').open&&state.providers.length===count&&$('formError').textContent.includes('推理强度')&&$('reasoningPicker').querySelector('button').getAttribute('aria-invalid')==='true','saving with only a model requires explicit reasoning and focuses the visible selector');
+  $('modelName').value='custom-model';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));$('modelName').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));let unlisted=false;try{modelPicker.validate();}catch{unlisted=true;}check(unlisted,'unlisted text cannot be used as the default model');
+  modelPicker.open(false);check(!modelPicker.options.some(option=>option.id===''),'Responses cannot inherit a Codex model');$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='gpt-codex','first actual model selected');
+  modelPicker.open(false);$('modelMenu').querySelector('[data-model-index="1"]').click();check($('modelName').value==='gpt-codex-mini','model selected again');
   const modelApi=window.relay;let resolveModels;
   window.relay={...modelApi,listModels:()=>new Promise(resolve=>{resolveModels=resolve;})};const lateModels=modelPicker.load();$('apiKey').dispatchEvent(new Event('input',{bubbles:true}));resolveModels({ok:true,data:{models:['stale-model']}});await lateModels;check(!modelPicker.models.length,'credential changes discard stale model response');
   window.relay={...modelApi,listModels:async()=>({ok:false,error:'HTTP 401：API 密钥无效'})};await modelPicker.load();check($('modelStatus').textContent.includes('401')&&$('modelName').value==='gpt-codex-mini','failed fetch keeps chosen model and explains error');window.relay=modelApi;
   modelPicker.open(false);$('reasoningPicker').querySelector('.filter-trigger').click();check($('modelMenu').classList.contains('hidden'),'opening effort closes model menu');
   const effortTrigger=$('reasoningPicker').querySelector('.filter-trigger');
-  for(const value of ['xhigh','xhigh','']){
+  for(const value of ['xhigh','xhigh','default']){
     if(effortTrigger.getAttribute('aria-expanded')!=='true')effortTrigger.click();
     const index=Array.from($('reasoning').options).findIndex(option=>option.value===value);
     $('reasoningMenu').querySelector('[data-index="'+index+'"] .filter-option-copy > span').click();
@@ -101,17 +159,30 @@
   $('accountKey').value='';$('accountKey').dispatchEvent(new Event('input',{bubbles:true}));$('testConnection').click();await waitFor(()=>!$('testConnection').disabled,'manual Sub2API check');
   check($('adapter').value==='sub2api'&&$('newapiFields').classList.contains('hidden'),'manual type preserved and fields updated');
   check(editorInspects===0,'testing does not synchronize list balance');
+  $('providerForm').requestSubmit();check($('providerDialog').open&&$('formError').textContent.includes('获取完整模型列表'),'credential edits require refetch before saving');
+  await modelPicker.load();modelPicker.close();check(modelPicker.models.length===3&&Boolean(modelPicker.discoveryToken),'complete discovery is restored before saving');
   $('providerForm').requestSubmit();
   await waitFor(()=>!$('providerDialog').open,'saving draft with blank optional site URL');
   const saved=state.providers.find(p=>p.name==='未保存识别测试');check(Boolean(saved),'draft saved');check(saved.siteUrl==='https://fixture-draft.example','stats URL follows API URL');
   check(saved.model==='gpt-codex-mini','selected default saved');
+  check(saved.modelSelection==='catalog'&&saved.models.length===3,'all fetched models are saved, not just the chosen default');
   check(saved.reasoning==='high','selected effort saved');
+  check(saved.modelFamily==='codex','model family is saved separately from the relay protocol');
   await waitFor(()=>!allBusy,'save refresh complete');
   check(editorInspects===0,'saving does not synchronize list balance');
+  await openEditor(saved.id);check($('providerPreset').value==='codex'&&$('protocol').value==='responses'&&$('modelName').value==='gpt-codex-mini'&&$('reasoning').value==='high','editing preserves all four saved selections');const relayBefore={baseUrl:$('baseUrl').value,key:$('apiKey').value,adapter:$('adapter').value,siteUrl:$('siteUrl').value};
+  const fetchedBeforeEdit=modelCalls;check(modelPicker.loaded&&modelPicker.models.length===3,'editing hydrates the saved complete list without HTTP');
+  $('providerPreset').value='grok';$('providerPreset').dispatchEvent(new Event('change',{bubbles:true}));
+  check($('protocol').value==='responses'&&$('baseUrl').value===relayBefore.baseUrl&&$('apiKey').value===relayBefore.key&&$('adapter').value===relayBefore.adapter&&$('siteUrl').value===relayBefore.siteUrl,'editing an existing relay preserves its Responses protocol and credentials for another model family');
+  check(modelPicker.loaded&&modelCalls===fetchedBeforeEdit,'cosmetic family changes preserve valid discovery without automatic HTTP');
+  $('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save model family with custom relay settings');
+  await openEditor(saved.id);check($('providerPreset').value==='grok'&&$('protocol').value==='responses'&&$('apiKey').value===relayBefore.key,'reopening a third-party relay restores its model family instead of guessing from an official hostname');
+  filterPickers.get('reasoning').open();$('reasoningMenu').querySelector('[data-index="1"]').click();$('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save explicit service default');
+  await openEditor(saved.id);check($('reasoning').value==='default'&&$('modelName').value==='gpt-codex-mini','explicit service default survives saving and reopening without discarding the chosen model');closeEditor();
   setState(await call('deleteProvider',{id:saved.id}));
   check(state.providers.length===count,'test draft cleaned up');
   // Late draft responses must not change a newly opened blank editor.
-  await openEditor();$('baseUrl').value='https://fixture-late.example';$('apiKey').value='sk-late-smoke-fake';$('accountOptions').open=true;
+  await openEditor();$('protocol').value='responses';$('protocol').dispatchEvent(new Event('change',{bubbles:true}));$('baseUrl').value='https://fixture-late.example';$('apiKey').value='sk-late-smoke-fake';$('accountOptions').open=true;
   await new Promise(resolve=>setTimeout(resolve,80));let resolveOld;
   try{
     window.relay={...relayApi,testConnection:()=>new Promise(resolve=>{resolveOld=resolve;})};
@@ -188,6 +259,8 @@
     check(inspections===beforeReopen&&$('detailBody').textContent.includes('尚未查询余额与用量')&&!$('refreshDetail').disabled,'uncached selection waits for explicit refresh');
     check($('detailRefreshTime').textContent==='上次刷新：尚未刷新','uncached selection clears the previous relay timestamp');
     $('pauseAuto').click();check(!auto&&$('pauseAuto').getAttribute('aria-pressed')==='true'&&$('pauseAuto').textContent==='继续自动刷新','right toolbar pauses automatic refresh');
+    await waitFor(()=>!autoSavePending,'pause preference saves without blocking manual refresh');
+    check((await call('state')).appSettings.autoRefresh===false,'pause is persisted for native tray refresh and reopening');
     nextRefresh=Date.now()-100;updateCountdown();check(inspections===beforeReopen,'paused timer does not query');
     $('refreshDetail').click();await waitFor(()=>!pending.size,'right toolbar manual refresh completes while automatic refresh is paused');
     check(inspections===beforeReopen+1&&Boolean(document.querySelector('#trendChart svg'))&&!auto,'manual refresh loads the selected relay while paused');
@@ -230,6 +303,8 @@
     await openDetails(other.id);
     let automaticIds=[];window.relay={...originalApi,inspect:input=>{automaticIds.push(input.id);return originalApi.inspect(input);}};
     $('pauseAuto').click();check(auto&&$('pauseAuto').getAttribute('aria-pressed')==='false','right toolbar resumes automatic refresh');
+    await waitFor(()=>!autoSavePending,'resume preference saves');
+    check((await call('state')).appSettings.autoRefresh===true,'resume is persisted');
     nextRefresh=Date.now()-100;updateCountdown();await waitFor(()=>!allBusy&&!pending.size,'scheduled automatic refresh completes');
     check(JSON.stringify(automaticIds)===JSON.stringify([activeId])&&detailId===other.id,'timer refreshes only applied relay and preserves viewed relay');
     check($('detailRefreshTime').textContent.startsWith('上次刷新：'+dateTime(currentDetail.at)+' · ')&&!$('refreshCountdown')&&!$('detailCountdown'),'automatic tick updates age without restoring countdown or relay status text');
@@ -270,6 +345,7 @@
   check(rangePeriod==='today'&&$('period').value==='today'&&capabilityQueries.length===beforeLogSelection,'NewAPI defaults to today without querying on selection');
   await refreshDetails();
   check(currentDetail.usage.mode==='logs'&&document.querySelectorAll('[data-grain]').length===3&&$('detailBody').querySelector('tbody tr'),'NewAPI keeps granularity controls and request records after switching back');
+  check($('detailBody').querySelectorAll('.recent-requests thead th[scope="col"]').length===7,'request records use the scoped seven-column layout with accessible column headers');
   const beforeSummarySelection=capabilityQueries.length;await openDetails(summaryRelay.id);
   check(rangePeriod==='today'&&currentDetail.period==='today'&&capabilityQueries.length===beforeSummarySelection,'reselecting Sub2API restores today from cache without querying');
   const customDay=RelayAdapters.range('today').start,customPeriod='range:'+customDay+':'+customDay;

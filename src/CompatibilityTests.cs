@@ -14,6 +14,11 @@ internal static class CompatibilityTests {
         return J.Encode(value);
     }
     public static void Run(List<string> checks,string root) {
+        string refreshDirectory=Path.Combine(root,"refresh-preference");var refreshStore=new Store(refreshDirectory,Path.Combine(root,"fake-codex"),new Secure());
+        if(!refreshStore.AutoRefresh)throw J.Error("Existing installations must keep automatic refresh enabled.");
+        refreshStore.SetAppSetting("autoRefresh",false);if(new Store(refreshDirectory,refreshStore.ConfigDir,new Secure()).AutoRefresh)throw J.Error("Pause was not persisted for native tray refresh.");
+        refreshStore.SetAppSetting("autoRefresh",true);if(!new Store(refreshDirectory,refreshStore.ConfigDir,new Secure()).AutoRefresh)throw J.Error("Resume was not persisted.");
+        checks.Add("automatic-refresh preference defaults, native persistence and restart restoration");
         string fixtureFile=Path.Combine(Program.BaseDir,"usage-fixtures.json");if(!File.Exists(fixtureFile))throw J.Error("Run tests/generate-fixtures.cjs before testing.");
         var fixtures=J.Arr(J.Read(fixtureFile,null));foreach(var fixture in fixtures){string adapter=J.Str(fixture,"adapter"),period=J.Str(fixture,"period"),model=J.Str(fixture,"model");object actual=adapter=="newapi"?Usage.NewUsage(J.Get(fixture,"payload"),period,model,J.Num(fixture,"divisor")??500000):Usage.SubUsage(J.Get(fixture,"payload"),period,model);object expected=J.Get(fixture,"expected");if(Canonical(actual)!=Canonical(expected)){J.Atomic(Path.Combine(Program.BaseDir,"compatibility-diff.json"),J.Encode(J.Map("name",J.Str(fixture,"name"),"actual",actual,"expected",expected)));throw J.Error("Statistics parity: "+J.Str(fixture,"name"));}}
         checks.Add(fixtures.Count+" statistics parity fixtures");
@@ -28,6 +33,9 @@ internal static class CompatibilityTests {
         UsageCacheChecks.Run(root,checks);
         ConnectionChecks.Run(checks).GetAwaiter().GetResult();
         ModelsChecks.Run(root,checks).GetAwaiter().GetResult();
+        ModelCatalogChecks.Run(root,checks);
+        Task.Run(()=>ModelBridgeChecks.Run(root,checks)).GetAwaiter().GetResult();
+        Task.Run(()=>ClaudeProtocolChecks.Run(root,checks)).GetAwaiter().GetResult();
         UpdateChecks.Run(root,checks).GetAwaiter().GetResult();
         if(System.Net.ServicePointManager.SecurityProtocol!=System.Net.SecurityProtocolType.Tls12)throw J.Error("Modern TLS not initialized");
         string networkError=Usage.ErrorText(new System.Net.Http.HttpRequestException("发送请求时出错。",new System.Net.WebException("certificate fixture-secret",null,System.Net.WebExceptionStatus.TrustFailure,null)),"fixture-secret");

@@ -20,8 +20,8 @@ button:not(:disabled):hover{filter:none}
 .sidebar-heading h2{font-size:12px;color:#697a90;font-weight:600}
 .sidebar-heading .count{vertical-align:0;margin-left:5px;background:#e3e9f2;color:#7d8ba0;font-size:10px}
 .sidebar-heading .icon-button{height:28px;min-width:28px;border-radius:7px}
-.sidebar-heading .import-current{color:#8292a7;border:1px solid transparent}
-.sidebar-heading .import-current:hover{color:var(--accent-deep);background:#fff;border-color:#dde4ed}
+.sidebar-heading .import-current{color:#8292a7;border:0;outline:none;box-shadow:none;background:transparent}
+.sidebar-heading .import-current:hover,.sidebar-heading .import-current:focus-visible{color:var(--accent-deep);background:transparent}
 .sidebar-add{margin:0 7px 18px;flex-shrink:0;min-height:39px;padding:0 12px;font-size:12px}
 .sidebar .provider-list{display:flex;flex-direction:column;gap:6px;min-height:0;overflow:auto;padding:3px 3px 8px;scrollbar-width:thin;scrollbar-color:#cdd6e2 transparent;flex:1;overscroll-behavior:contain}
 .provider-card{padding:12px 5px;gap:3px;border:1px solid transparent;border-radius:11px;background:transparent;box-shadow:none;flex-shrink:0;min-width:0;transition:background .16s,border-color .16s,box-shadow .16s}
@@ -98,6 +98,7 @@ main>header{align-items:center;margin-bottom:24px;gap:18px;min-height:80px}
 .detail-refresh-actions #pauseAuto{height:40px;width:94px;padding:0 10px;font-size:11px;color:#6d7c90;background:#f8fafd;border-radius:8px}
 .detail-refresh-actions .detail-refresh{margin-left:0;min-width:98px;border-radius:8px}
 .filter-option,.model-menu>button{font-size:12px;color:#53657c}
+.detail-toolbar .filter-menu{left:0;right:auto}
 .filter-option-copy small{color:#8493a7}
 .metrics-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:23px}
 .metric-card{padding:18px 15px 16px;border-radius:12px;box-shadow:0 2px 5px #26364b02;display:flex;flex-direction:column;min-height:130px}
@@ -131,6 +132,16 @@ main>header{align-items:center;margin-bottom:24px;gap:18px;min-height:80px}
 .table-card{padding:20px 23px;border-radius:var(--radius);box-shadow:0 2px 5px #26364b02}
 .table-card h2{font-size:14px;font-weight:600;color:#2e4059;margin-bottom:18px}
 .table-scroll{scrollbar-width:thin;scrollbar-color:#ccd5e1 transparent}
+.recent-requests .table-scroll{scrollbar-width:auto;scrollbar-color:auto;scrollbar-gutter:stable;padding-right:12px;overscroll-behavior:contain}
+.recent-requests .table-scroll::-webkit-scrollbar{width:8px;height:8px}
+.recent-requests .table-scroll::-webkit-scrollbar-track,.recent-requests .table-scroll::-webkit-scrollbar-corner{background:transparent}
+.recent-requests .table-scroll::-webkit-scrollbar-thumb{background:#c4cfde;border:2px solid transparent;border-radius:6px;background-clip:padding-box}
+.recent-requests .table-scroll::-webkit-scrollbar-thumb:hover{background-color:#9baec6}
+.recent-requests .table-scroll::-webkit-scrollbar-button{display:none;width:0;height:0}
+.recent-requests table{table-layout:fixed;min-width:700px}
+.recent-requests th,.recent-requests td{text-align:left;vertical-align:top;padding-left:10px;padding-right:10px;white-space:normal;overflow-wrap:anywhere}
+.recent-requests th{position:sticky;top:0;z-index:1;padding-top:8px}
+.recent-requests td:first-child{max-width:none;overflow:visible;text-overflow:clip}
 th{font-size:11px;color:#8b99ad;padding:0 10px 12px}
 td{font-size:11px;color:#6c7e96;padding-top:13px;padding-bottom:13px;border-top-color:#edf1f6}
 tbody tr:hover{background:#fafcff}
@@ -156,6 +167,8 @@ dialog{border-color:#dfe6ee;border-radius:16px;max-width:calc(100vw - 48px)}
 .dialog-body input::placeholder,.dialog-body textarea::placeholder{color:#a6b1c0}
 .form-guidance{font-size:11px;color:#8696ac}
 .field-tag{font-size:9px}
+#providerDialog .editor-select.is-required-empty .filter-trigger,#providerDialog #modelName.is-required-empty{border-color:#ebcdbb;background:#fffcf8}
+#providerDialog .editor-select.is-required-empty .filter-value{color:#a08b7e}
 .dialog-footer{padding:15px 26px;background:#f8fafd}
 .dialog-footer>span{font-size:11px;color:#8998ad}
 .dialog-footer .button{font-size:12px}
@@ -219,6 +232,7 @@ dialog{border-color:#dfe6ee;border-radius:16px;max-width:calc(100vw - 48px)}
   #providerDialog .dialog-header,#providerDialog .dialog-footer,#dateDialog .dialog-header,#dateDialog .dialog-footer{flex-shrink:0}
   #providerDialog .dialog-body,#dateDialog .dialog-body{min-height:0;max-height:none;overflow:auto}
 }
+.model-usage{display:block;line-height:1.8;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){
   button,.provider-card,.preference-switch,.preference-switch::after{transition:none}
   .provider-card .refresh-provider[aria-busy=true]{animation:none}

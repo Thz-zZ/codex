@@ -20,7 +20,7 @@ startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 startup.wShowWindow = 0
 child = subprocess.Popen([str(executable), '--smoke-test'], startupinfo=startup)
 root = psutil.Process(child.pid)
-phases, visible, hidden = {}, False, False
+phases = {}
 started = time.monotonic()
 started_wall = time.time()
 try:
@@ -40,12 +40,15 @@ try:
                 private += memory.private
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-        webview = 'msedgewebview2.exe' in names
-        if webview:
-            visible = True
-        elif visible:
-            hidden = True
-        phase = 'reopened' if hidden and webview else 'tray' if hidden else 'visible' if visible else 'startup'
+        phase = 'startup'
+        phase_file = output / 'window-phase.json'
+        try:
+            if phase_file.stat().st_mtime >= started_wall:
+                reported_phase = json.loads(phase_file.read_text(encoding='utf-8')).get('phase')
+                if reported_phase in ('visible', 'tray', 'reopened'):
+                    phase = reported_phase
+        except (OSError, ValueError):
+            pass
         sample = {'workingSetMiB': round(working / 1048576, 2),
                   'privateMiB': round(private / 1048576, 2), 'processes': len(names)}
         record = phases.setdefault(phase, {'peakWorkingSetMiB': 0, 'peakPrivateMiB': 0, 'samples': 0})

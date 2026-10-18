@@ -104,7 +104,8 @@ main.sessions-layout>header{flex-shrink:0}
   .session-counts>span{margin-left:5px}.session-write-hint{display:none}
 }
 @media(max-width:980px){
-  .session-workspace{grid-template-columns:minmax(250px,.9fr) minmax(265px,1.1fr)}
+  .session-workspace{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}
+  .session-selection,.session-preview-tools,.session-list-footer{flex-wrap:wrap}
   .session-row-meta{font-size:8px}.session-preview-heading>.button{padding:3px 5px;font-size:9px}
   .session-data-actions{gap:2px}.session-data-actions .button{font-size:10px;padding:3px 6px}
   .session-counts{font-size:11px}.session-counts>span{font-size:10px;margin-left:3px}
