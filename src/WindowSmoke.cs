@@ -1,14 +1,39 @@
 using System;
+using System.Drawing;
 using System.IO;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 
 namespace RelayLite {
 internal sealed partial class MainForm {
+    async Task CheckSavedWindowSmoke(){
+        var originalBounds=Bounds;var originalState=WindowState;var originalView=view;
+        string file=Path.Combine(dataDir,"window-state.json");
+        try{
+            WindowState=FormWindowState.Normal;
+            Bounds=WindowPlacement.Fit(new Rectangle(67,83,1080,740),Screen.FromControl(this).WorkingArea,MinimumSize);
+            await Task.Delay(80);var normal=Bounds;windowPlacement.Save();
+            var saved=WindowPlacement.Read(file);
+            if(saved==null||saved.Bounds!=normal||saved.Maximized)throw J.Error("Real app did not save normal window bounds.");
+            WindowState=FormWindowState.Maximized;await Task.Delay(80);windowPlacement.Save();saved=WindowPlacement.Read(file);
+            if(saved==null||!saved.Maximized||saved.Bounds!=normal)throw J.Error("Real app did not retain normal bounds while maximized.");
+            WindowState=FormWindowState.Minimized;await Task.Delay(80);HideToTray();saved=WindowPlacement.Read(file);
+            if(saved==null||!saved.Maximized||saved.Bounds!=normal)throw J.Error("Minimizing to tray corrupted the saved window geometry.");
+            await Open();await Task.Delay(80);
+            if(WindowState!=FormWindowState.Maximized||!ReferenceEquals(view,originalView))throw J.Error("Reopening from tray lost maximization or recreated WebView.");
+            WindowState=FormWindowState.Normal;await Task.Delay(80);
+            if(Bounds!=normal)throw J.Error("Restoring maximization lost the last normal window size.");
+            J.Atomic(Path.Combine(qaDir,"window-placement-result.json"),J.Encode(J.Map("ok",true,"normalBoundsSaved",true,"maximizedSaved",true,"minimizedDoesNotOverwrite",true,"trayMaximizedRestored",true,"normalRestoreBoundsPreserved",true,"sameWebView",true)));
+        }finally{
+            WindowState=FormWindowState.Normal;Bounds=originalBounds;
+            if(originalState==FormWindowState.Maximized)WindowState=originalState;
+            windowPlacement.Save();
+        }
+    }
     async Task CheckTrayWindowSmoke(){
         var originalView=view;
         var originalCore=view.CoreWebView2;
-        var originalBridge=modelBridge;
         int navigationCount=0,backgroundFetches=0;
         EventHandler<CoreWebView2NavigationStartingEventArgs> navigationHandler=(sender,args)=>navigationCount++;
         originalCore.NavigationStarting+=navigationHandler;
@@ -21,7 +46,7 @@ internal sealed partial class MainForm {
                 string before=await originalCore.ExecuteScriptAsync(snapshot);
                 Close();
                 await Task.Delay(100);
-                if(Visible||ShowInTaskbar||quitting||!ReferenceEquals(view,originalView)||!ReferenceEquals(view.CoreWebView2,originalCore)||!ReferenceEquals(modelBridge,originalBridge))throw J.Error("Closing the window did not retain the background application and WebView.");
+                if(Visible||ShowInTaskbar||quitting||!ReferenceEquals(view,originalView)||!ReferenceEquals(view.CoreWebView2,originalCore))throw J.Error("Closing the window did not retain the background application and WebView.");
                 string hidden=await originalCore.ExecuteScriptAsync("(()=>{if(!document.hidden)return false;window.trayHiddenAutoFetches=0;nextRefresh=Date.now()-100;updateCountdown();nextRefresh=Date.now()+60000;return trayHiddenAutoFetches===0;})()");
                 if(hidden!="true")throw J.Error("Hidden WebView duplicated automatic refresh or remained visible.");
                 if(cycle==0){

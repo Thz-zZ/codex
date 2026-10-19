@@ -5,7 +5,7 @@ const path=require('node:path');
 const {spawn}=require('node:child_process');
 const {once}=require('node:events');
 
-const hostPath=path.resolve(process.argv[2]||'build/model-bridge-tests/ModelBridgeTestHost.exe');
+const hostPath=path.resolve(process.argv[2]||'build/codex-provider-tests/CodexProviderTestHost.exe');
 const codexPath=process.argv[3]||'codex';
 
 async function checkModel(selection){
@@ -59,10 +59,10 @@ async function checkModel(selection){
 
 (async()=>{
   for(const selection of [
-    {model:'claude-opus-5-5',protocol:'anthropic',effort:'default'},
-    {model:'claude-opus-5-5',protocol:'anthropic',effort:'high'},
-    {model:'deepseek-fixture',protocol:'chat-completions',effort:'medium'},
+    {model:'gpt-codex-fixture',protocol:'responses',effort:'default'},
+    {model:'gpt-codex-fixture',protocol:'responses',effort:'high'},
+    {model:'gpt-codex-mini-fixture',protocol:'responses',effort:'medium'},
     {model:'gpt-6.1-sol',protocol:'responses',effort:'xhigh'},
-    ...['responses','chat-completions','anthropic'].map(protocol=>({model:'relay-default',protocol,effort:'default',models:['claude-fixture','deepseek-fixture','relay-default']}))
+    {model:'relay-default',protocol:'responses',effort:'default',models:['gpt-codex-fixture','gpt-codex-mini-fixture','relay-default']}
   ])await checkModel(selection);
 })().catch(error=>{console.error(error);process.exitCode=1;});

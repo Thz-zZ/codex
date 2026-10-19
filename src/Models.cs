@@ -40,7 +40,7 @@ internal static class Models {
                 if(!J.True(J.Get(payload,"has_more")))break;
                 string cursor=J.Str(payload,"last_id");if(cursor==""&&items.Count>0)cursor=items[items.Count-1] is string?J.S(items[items.Count-1]):J.Str(items[items.Count-1],"id");
                 if(page>=99||cursor==""||cursor.Length>256||cursor.Any(char.IsControl)||!cursors.Add(cursor))throw J.Error("模型列表分页无效或过多，未保存不完整列表，请检查中转接口。");
-                url=root+"/models?"+(ModelProtocol.Protocol(input)=="anthropic"?"after_id=":"after=")+Uri.EscapeDataString(cursor);
+                url=root+"/models?after="+Uri.EscapeDataString(cursor);
             }
             if(ids.Count==0)throw J.Error("该密钥未返回可用模型，无法设置默认模型，请检查中转权限。");
             string token=Guid.NewGuid().ToString("N");var models=ids.ToList();

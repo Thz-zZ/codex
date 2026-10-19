@@ -49,7 +49,6 @@ class RelayModelPicker {
   async load(){
     if(!this.isOpen()||this.button.disabled)return;
     const input=this.getCredentials(),signature=JSON.stringify(input),epoch=++this.epoch;
-    if(!input.protocol){this.status.textContent='请先选择模型调用协议，再获取模型。';this.status.classList.add('error');return;}
     if(!input.baseUrl||!input.key){this.status.textContent='请先填写 API 地址和 API 调用密钥。';this.status.classList.add('error');return;}
     this.close();this.models=[];this.loaded=false;this.discoveryToken='';this.button.disabled=true;this.button.textContent='获取中…';this.status.classList.remove('error');this.status.textContent='正在读取该 API 密钥可见的模型列表…';
     const current=()=>this.isOpen()&&epoch===this.epoch&&signature===JSON.stringify(this.getCredentials());

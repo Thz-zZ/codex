@@ -14,6 +14,7 @@ internal static class CompatibilityTests {
         return J.Encode(value);
     }
     public static void Run(List<string> checks,string root) {
+        WindowPlacementChecks.Run(root,checks);
         string refreshDirectory=Path.Combine(root,"refresh-preference");var refreshStore=new Store(refreshDirectory,Path.Combine(root,"fake-codex"),new Secure());
         if(!refreshStore.AutoRefresh)throw J.Error("Existing installations must keep automatic refresh enabled.");
         refreshStore.SetAppSetting("autoRefresh",false);if(new Store(refreshDirectory,refreshStore.ConfigDir,new Secure()).AutoRefresh)throw J.Error("Pause was not persisted for native tray refresh.");
@@ -34,8 +35,7 @@ internal static class CompatibilityTests {
         ConnectionChecks.Run(checks).GetAwaiter().GetResult();
         ModelsChecks.Run(root,checks).GetAwaiter().GetResult();
         ModelCatalogChecks.Run(root,checks);
-        Task.Run(()=>ModelBridgeChecks.Run(root,checks)).GetAwaiter().GetResult();
-        Task.Run(()=>ClaudeProtocolChecks.Run(root,checks)).GetAwaiter().GetResult();
+        CodexOnlyChecks.Run(root,checks).GetAwaiter().GetResult();
         UpdateChecks.Run(root,checks).GetAwaiter().GetResult();
         if(System.Net.ServicePointManager.SecurityProtocol!=System.Net.SecurityProtocolType.Tls12)throw J.Error("Modern TLS not initialized");
         string networkError=Usage.ErrorText(new System.Net.Http.HttpRequestException("发送请求时出错。",new System.Net.WebException("certificate fixture-secret",null,System.Net.WebExceptionStatus.TrustFailure,null)),"fixture-secret");

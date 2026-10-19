@@ -31,26 +31,20 @@ internal static class ModelsChecks {
             Usage.FetchOverride=(url,key,user)=>Task.FromResult<object>(J.Map("data",J.Map("id","not-a-list")));bool rejected=false;try{await Models.List(input);}catch(Exception e){rejected=e.Message.Contains("模型列表");}Check(rejected,"malformed list explained");
             Usage.FetchOverride=(url,key,user)=>{throw J.Error("HTTP 401 fixture-model-secret");};try{await Models.List(input);throw J.Error("expected rejection");}catch(Exception e){Check(e.Message.Contains("API 密钥无效")&&!e.Message.Contains("fixture-model-secret"),"invalid-key error is actionable and redacted");}
             bool fetched=false;Usage.FetchOverride=(url,key,user)=>{fetched=true;throw J.Error("unexpected HTTP");};input["key"]="";rejected=false;try{await Models.List(input);}catch{rejected=true;}Check(rejected&&!fetched,"missing API key rejected before HTTP");
-            input["key"]="fixture-model-secret";input["protocol"]="chat-completions";
-            foreach(string rootUrl in new[]{"https://glm.example/api/paas/v4","https://qwen.example/compatible-mode/v1","https://gemini.example/v1beta/openai"}){
-                input["baseUrl"]=rootUrl;Usage.FetchOverride=(url,key,user)=>{Check(url==rootUrl+"/models","chat provider versioned model endpoint");return Task.FromResult<object>(J.Map("data",new[]{J.Map("id","provider-fixture")}));};
-                Check(J.Arr(J.Get(await Models.List(input),"models")).Count==1,"chat provider models discovered");
-            }
-            input["protocol"]="anthropic";input["baseUrl"]="https://pages.example/v1";int pages=0;
-            Usage.FetchOverride=(url,key,user)=>{pages++;Check(url=="https://pages.example/v1/models"+(pages==1?"":"?after_id=page-1"),"pagination stays on the authenticated model endpoint");return Task.FromResult<object>(J.Map("data",new[]{J.Map("id","page-"+pages)},"has_more",pages==1,"last_id","page-1"));};
-            Check(J.Arr(J.Get(await Models.List(input),"models")).Count==2&&pages==2,"paginated Claude model list is collected in full");
+            input["key"]="fixture-model-secret";input["protocol"]="responses";input["baseUrl"]="https://pages.example/proxy/v1";int pages=0;
+            Usage.FetchOverride=(url,key,user)=>{pages++;Check(url=="https://pages.example/proxy/v1/models"+(pages==1?"":"?after=page-1"),"pagination stays on the authenticated Responses model endpoint");return Task.FromResult<object>(J.Map("data",new[]{J.Map("id","page-"+pages)},"has_more",pages==1,"last_id","page-1"));};
+            Check(J.Arr(J.Get(await Models.List(input),"models")).Count==2&&pages==2,"paginated Codex relay model list is collected in full");
             Usage.FetchOverride=(url,key,user)=>Task.FromResult<object>(J.Map("data",new[]{J.Map("id","same-page")},"has_more",true,"last_id","same-page"));bool loop=false;try{await Models.List(input);}catch(Exception error){loop=error.Message.Contains("分页");}Check(loop,"looping pagination is rejected instead of saving an incomplete list");
-            var familyInput=J.Map("name","shared relay","baseUrl","https://shared-relay.example/v1","key","fixture-family-key","accountKey","fixture-family-account","adapter","sub2api","model","relay-aliased-model","modelFamily","claude","protocol","responses");
+            var familyInput=J.Map("name","Codex relay","baseUrl","https://shared-relay.example/v1","key","fixture-family-key","accountKey","fixture-family-account","adapter","sub2api","model","relay-aliased-model","modelFamily","codex","protocol","responses");
             var familyProvider=store.Upsert(familyInput);string familyId=J.Str(familyProvider,"id");
             store=new Store(dir,config,new Secure());var familyDetails=store.Details(familyId);
-            Check(J.Str(familyDetails,"modelFamily")=="claude"&&J.Str(familyDetails,"protocol")=="responses"&&J.Str(familyDetails,"adapter")=="sub2api"&&J.Str(familyDetails,"baseUrl")=="https://shared-relay.example","model family persists independently of custom relay host, protocol and statistics");
-            familyInput["id"]=familyId;familyInput["modelFamily"]="grok";familyInput["key"]="";familyInput["accountKey"]="";store.Upsert(familyInput);familyDetails=store.Details(familyId);
-            Check(J.Str(familyDetails,"modelFamily")=="grok"&&J.Str(familyDetails,"key")=="fixture-family-key"&&J.Str(familyDetails,"accountKey")=="fixture-family-account","changing family preserves encrypted relay credentials");
-            familyInput.Remove("modelFamily");store.Upsert(familyInput);Check(J.Str(store.Details(familyId),"modelFamily")=="grok","updates from older clients preserve a saved model family");
-            familyInput["modelFamily"]="invalid-family";rejected=false;try{store.Upsert(familyInput);}catch{rejected=true;}Check(rejected&&J.Str(store.Details(familyId),"modelFamily")=="grok","invalid model family is rejected without changing a relay");
+            Check(J.Str(familyDetails,"modelFamily")=="codex"&&J.Str(familyDetails,"protocol")=="responses"&&J.Str(familyDetails,"adapter")=="sub2api"&&J.Str(familyDetails,"baseUrl")=="https://shared-relay.example","Codex type persists with a custom relay host and independent statistics adapter");
+            familyInput["id"]=familyId;familyInput.Remove("modelFamily");familyInput.Remove("protocol");familyInput["key"]="";familyInput["accountKey"]="";store.Upsert(familyInput);familyDetails=store.Details(familyId);
+            Check(J.Str(familyDetails,"modelFamily")=="codex"&&J.Str(familyDetails,"protocol")=="responses"&&J.Str(familyDetails,"key")=="fixture-family-key"&&J.Str(familyDetails,"accountKey")=="fixture-family-account","single-product defaults preserve encrypted relay credentials");
+            familyInput["modelFamily"]="invalid-family";rejected=false;try{store.Upsert(familyInput);}catch{rejected=true;}Check(rejected&&J.Str(store.Details(familyId),"modelFamily")=="codex","unsupported model family is rejected without changing a relay");
             checks.Add("relay model discovery, credential routing, malformed and unauthorized responses, selected default save and apply");
             checks.Add("verified full model catalogs, required default membership, pagination, credential binding and saved-list editing after restart");
-            checks.Add("third-party model family persistence independent of relay host, protocol, statistics and encrypted credentials");
+            checks.Add("Codex-only defaults with custom relay hosts, independent statistics and preserved encrypted credentials");
         }finally{Usage.FetchOverride=null;}
     }
 }

@@ -14,15 +14,15 @@ internal static class DraftChecks {
         }
         checks.Add("saving blank and whitespace stats URL follows API URL");
         var selectedStore=new Store(Path.Combine(root,"selection-store"),Path.Combine(root,"selection-config"),new Secure());
-        foreach(string protocol in new[]{"responses","chat-completions","anthropic"}){
+        foreach(string protocol in new[]{"responses"}){
             var selection=J.Map("name","required selections","baseUrl","https://selection.example/v1","key","fixture-selection-key","modelFamily","codex","protocol",protocol,"model","selected-fixture","reasoning","default");
-            foreach(string field in new[]{"modelFamily","protocol","model","reasoning"})foreach(string missing in new[]{"","   "}){
-                var invalid=J.Obj(J.Clone(selection));invalid[field]=missing;int count=selectedStore.JCount();bool rejected=false;try{selectedStore.Upsert(invalid,true);}catch(Exception error){rejected=error.Message.Contains(field=="modelFamily"?"模型类型":field=="protocol"?"调用协议":field=="model"?"模型":"推理强度");}
-                Check(rejected&&selectedStore.JCount()==count,"all protocols require all four explicit selections before saving");
+            foreach(string field in new[]{"model","reasoning"})foreach(string missing in new[]{"","   "}){
+                var invalid=J.Obj(J.Clone(selection));invalid[field]=missing;int count=selectedStore.JCount();bool rejected=false;try{selectedStore.Upsert(invalid,true);}catch(Exception error){rejected=error.Message.Contains(field=="model"?"模型":"推理强度");}
+                Check(rejected&&selectedStore.JCount()==count,"Codex requires an explicit default model and reasoning before saving");
                 invalid.Remove(field);rejected=false;try{selectedStore.Upsert(invalid,true);}catch{rejected=true;}Check(rejected&&selectedStore.JCount()==count,"omitted selection cannot bypass validation");
             }
             foreach(string effort in new[]{"default","low","medium","high","xhigh","max","ultra","invalid"}){
-                selection["reasoning"]=effort;bool allowed=effort!="invalid"&&(protocol=="responses"||new[]{"default","low","medium","high"}.Contains(effort));
+                selection["reasoning"]=effort;bool allowed=effort!="invalid";
                 string beforeSelection=File.Exists(selectedStore.File)?File.ReadAllText(selectedStore.File):"";bool rejected=false;object saved=null;try{saved=selectedStore.Upsert(selection,true);}catch{rejected=true;}
                 Check(rejected!=allowed,"reasoning choices match the selected protocol");
                 if(allowed)Check(J.Str(saved,"reasoning")==effort,"explicit effort and service default are persisted");
@@ -35,11 +35,10 @@ internal static class DraftChecks {
         selectedStore.Switch(J.Str(selected,"id"));Check(J.Str(selectedStore.ConfigInfo(),"model")=="selected-fixture"&&J.Str(selectedStore.ConfigInfo(),"reasoning")=="high","selected model and effort replace old direct settings");
         string unchanged=File.ReadAllText(selectedStore.File);selected["reasoning"]="";bool missingEffort=false;try{selectedStore.Upsert(selected,true);}catch{missingEffort=true;}Check(missingEffort&&File.ReadAllText(selectedStore.File)==unchanged,"editing cannot silently discard a required selection");
         selected["reasoning"]="default";selectedStore.Upsert(selected,true);selectedStore.Switch(J.Str(selected,"id"));
-        foreach(string field in new[]{"modelFamily","protocol"}){var invalid=J.Obj(J.Clone(selected));invalid.Remove(field);string previous=File.ReadAllText(selectedStore.File);bool rejected=false;try{selectedStore.Upsert(invalid,true);}catch{rejected=true;}Check(rejected&&File.ReadAllText(selectedStore.File)==previous,"editing cannot substitute a saved family or default protocol for a missing explicit selection");}
         var selectedConfig=Nett.Toml.ReadString(File.ReadAllText(Path.Combine(selectedStore.ConfigDir,"config.toml"))).ToDictionary();
         Check(!J.Has(selectedConfig,"model_reasoning_effort")&&J.True(J.Get(J.Get(selectedConfig,"features"),"keep")),"service default removes inherited effort without writing an invalid default effort or touching other settings");
         selectedStore=new Store(selectedStore.Dir,selectedStore.ConfigDir,new Secure());Check(J.Str(selectedStore.Details(J.Str(selected,"id")),"reasoning")=="default","explicit service default survives restart");
-        checks.Add("mandatory family, protocol, model and reasoning selections for every protocol, edit validation and unsupported effort rejection");
+        checks.Add("mandatory Codex default model and reasoning selections, edit validation and invalid effort rejection");
         checks.Add("explicit service default persistence and direct config clearing without invalid reasoning values");
         string before=File.ReadAllText(store.File);var paths=new List<string>();var input=J.Map("baseUrl","fixture.example/v1","siteUrl","","key","fixture-draft-key","adapter","auto");
         try{

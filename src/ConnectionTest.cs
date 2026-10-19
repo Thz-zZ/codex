@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 namespace RelayLite {
 internal static class ConnectionTest {
     internal static async Task<object> Run(object input){
+        ModelProtocol.Protocol(input);
+        ModelProtocol.ValidateAddress(J.Str(input,"baseUrl"));
         var checks=new List<object>();string key=J.Str(input,"key").Trim(),account=J.Str(input,"accountKey").Trim(),baseUrl="",site="";
         Func<string,string,string,string,object> row=(field,label,status,message)=>J.Map("field",field,"label",label,"status",status,"message",message);
         Func<Exception,string,string> explain=(error,field)=>{

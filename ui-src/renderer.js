@@ -114,9 +114,10 @@ function renderSelectedHeader(){
   $('selectedMeta').textContent=p?p.baseUrl+' · '+protocolLabel(p)+' · '+adapterLabel(p)+' · 模型：'+(p.model||state.config.model||'沿用 Codex 设置'):page==='settings'?'管理 Codex 配置与本地数据':page==='sessions'?'浏览本地对话 · 导出、导入与整理会话':'为 Codex 管理中转与用量';
   $('selectedMeta').dataset.tooltip=$('selectedMeta').textContent;
   $('selectedStatus').className='badge'+(p?' '+(p.active?'live':'viewing'):' hidden');
-  $('selectedStatus').textContent=p?.active?'使用中':'未应用';
+  $('selectedStatus').textContent=requiresCodexSetup(p)?'需重新配置':p?.active?'使用中':'未应用';
   $('detailActions').dataset.id=p?.id||'';
   $('detailActions').innerHTML=p?'<div class="provider-edit-actions" role="group" aria-label="中转管理"><button class="button" data-action="edit"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1 12-12a2.8 2.8 0 0 0-4-4L4 15z"/></svg>编辑</button><button class="icon-button delete-selected" data-action="delete" aria-label="删除中转" data-tooltip="删除中转"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg></button></div><button class="button apply-provider" data-action="switch"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(p.active?'<path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1"/>':'<path d="M4 12h16m-6-6 6 6-6 6"/>')+'</svg>'+(p.active?'重新应用':'应用到 Codex')+'</button>':'';
+  if(p&&requiresCodexSetup(p)){const button=$('detailActions').querySelector('[data-action=\"switch\"]');button.disabled=true;button.textContent='请先编辑为 Codex';}
 }
 function renderState(){
   $('providerCount').textContent=state.providers.length;
@@ -130,7 +131,7 @@ function renderState(){
 }
 function renderProviders(){
   if(draggedId)return;
-  if(!state.providers.length){$('providerList').innerHTML='<div class="sidebar-empty">还没有中转<br>点击上方添加，或导入当前配置</div>';return;}
+  if(!state.providers.length){$('providerList').innerHTML='<div class="sidebar-empty">还没有中转<br>点击左上角“＋”添加，或导入当前配置</div>';return;}
   $('providerList').innerHTML=state.providers.map((p,i)=>{
     const busy=[...pending].some(k=>k.startsWith(p.id+':')),today=matchingCache(p.id,'today','all',false)||(state.usageCache||[]).find(r=>r.id===p.id&&validCache(r)),week=matchingCache(p.id,'7','all',false);
     let entry=week&&(!today||Date.parse(week.at)>Date.parse(today.summary?.checkedAt||today.checkedAt||today.at))?week:today;
@@ -143,35 +144,22 @@ function renderProviders(){
   }).join('');
 }
 let draftDetection=null;
-const providerPresets={
-  codex:{name:'Codex',protocol:'responses'},
-  claude:{name:'Claude',protocol:'anthropic'},
-  grok:{name:'Grok',protocol:'chat-completions'},
-  deepseek:{name:'DeepSeek',protocol:'chat-completions'},
-  qwen:{name:'通义千问',protocol:'chat-completions'},
-  glm:{name:'智谱 GLM',protocol:'chat-completions'},
-  gemini:{name:'Gemini',protocol:'chat-completions'}
-};
-function providerFamily(provider){
-  if(Object.hasOwn(providerPresets,provider?.modelFamily))return provider.modelFamily;
-  return '';
+function requiresCodexSetup(provider){
+  return Boolean(provider&&(provider.requiresCodexSetup||(provider.modelFamily&&provider.modelFamily!=='codex')||(provider.protocol&&provider.protocol!=='responses')));
 }
-function isBridged(provider){return Boolean(provider?.protocol&&provider.protocol!=='responses');}
-function protocolLabel(provider){return provider.protocol==='anthropic'?'Claude Messages 桥接':isBridged(provider)?'Chat Completions 桥接':'Responses';}
+function protocolLabel(provider){return requiresCodexSetup(provider)?'旧配置 · 需重新配置 Codex':'Codex · Responses';}
 function modelUsageSummary(provider){
   if(!provider)return '';
-  const effort=value=>!value||value==='default'?'服务默认（未发送强度）':value;
-  const latest=provider.bridgeUsage;
-  return `<section class="notice model-usage"><strong>模型参数</strong><div>已保存${provider.modelSelection==='catalog'?'默认模型':''}：${esc(provider.model||'未指定模型')} · 强度 ${esc(effort(provider.reasoning))}（修改后需应用）</div>${provider.modelSelection==='catalog'?`<div>已保存 ${fmt(provider.models?.length||0)} 个模型，应用后可在 Codex 内直接切换；此处所选仅作默认。${isBridged(provider)?'推理强度仍使用已应用的中转设置。':''}</div>`:isBridged(provider)?'<div>旧记录仍固定模型；编辑时重新获取列表并保存、应用，即可在 Codex 内切换全部模型。</div>':'<div>Responses 直连按 Codex 实际请求调用；修改配置后旧会话需重新选择或新建。</div>'}${latest?`<div>最近完成：${esc(dateTime(latest.at))} · 实际发送 ${esc(latest.model)} · 强度 ${esc(effort(latest.reasoning))}${latest.status==='incomplete'?' · 输出未完整':''}</div>`:''}</section>`;
+  if(requiresCodexSetup(provider))return '<section class="notice error model-usage"><strong>旧中转需重新配置</strong><div>本应用现在仅支持 Codex Responses 直连。原记录和密钥仍保留；请编辑并确认上游支持 Responses，重新获取模型列表后保存、应用。</div></section>';
+  const effort=!provider.reasoning||provider.reasoning==='default'?'服务默认（未发送强度）':provider.reasoning;
+  return `<section class="notice model-usage"><strong>模型参数</strong><div>已保存${provider.modelSelection==='catalog'?'默认模型':''}：${esc(provider.model||'未指定模型')} · 强度 ${esc(effort)}（修改后需应用）</div>${provider.modelSelection==='catalog'?`<div>已保存 ${fmt(provider.models?.length||0)} 个模型，应用后可在 Codex 内直接切换；此处所选仅作默认。</div>`:'<div>Responses 直连按 Codex 实际请求调用；修改配置后旧会话需重新选择或新建。</div>'}</section>`;
 }
-function updateProtocolForm(){
-  const protocol=$('protocol').value,bridging=Boolean(protocol)&&protocol!=='responses',claude=protocol==='anthropic';$('modelName').required=true;
-  $('protocolHelp').textContent=protocol?'使用你填写的中转地址和密钥，调用协议以中转站说明为准。'+(bridging?(claude?'通过 Claude Messages 本地桥接。':'通过 Chat Completions 本地桥接。')+'支持文本、图片和工具调用（取决于模型），暂不支持 Codex 原生联网搜索与音频。使用时请保持本应用运行，可收起到托盘。':'支持 Responses 的中转直接连接，无需本地桥接；其他协议可在此切换。'):'请手动选择中转站实际支持的模型调用协议；选择模型类型不会自动代选协议。';
-  $('modelHelp').textContent='先获取中转的完整模型列表，再从列表中明确选择一个默认模型（不会自动选择）。应用时同步全部模型，重启 Codex 后可在其中直接切换；这里所选仅作默认，不锁定模型。列表不代表每个模型都支持当前协议，调用协议请以中转说明为准。';
+function updateModelForm(){
+  $('modelName').required=true;
+  $('modelHelp').textContent='先获取中转的完整模型列表，再从列表中明确选择一个支持 Codex Responses 的默认模型（不会自动选择）。应用时同步全部模型，重启 Codex 后可在其中直接切换；这里所选仅作默认，不锁定模型。';
   $('modelName').placeholder='请先获取模型，再选择默认模型';syncModelRequirement();
-  for(const option of $('reasoning').options)option.disabled=!option.value||bridging&&['xhigh','max','ultra'].includes(option.value);
-  if($('reasoning').selectedOptions[0]?.disabled)$('reasoning').value='';
-  $('reasoningHelp').textContent=(claude?'low、medium、high 原样发送为 Claude output_config.effort；不换算思考预算，不强制开启旧模型扩展思考。':bridging?'low、medium、high 原样发送为 reasoning_effort，适用于中转支持该字段的模型。':protocol?'请选择中转站和模型支持的强度，应用后写入 Codex 配置。':'请先选择模型调用协议，再明确选择推理强度。')+(bridging?'已应用的中转强度优先于 Codex 会话选择；不支持时明确报错，不自动降级。':'')+'不指定参数时，也必须手动选择“服务默认”。';
+  for(const option of $('reasoning').options)option.disabled=!option.value;
+  $('reasoningHelp').textContent='请选择中转站和模型支持的强度，应用后写入 Codex 配置。不指定参数时，也必须手动选择“服务默认”。';
   filterPickers.get('reasoning')?.sync();
 }
 function updateAccountForm(){
@@ -180,7 +168,7 @@ function updateAccountForm(){
   $('newapiFields').classList.toggle('hidden',type==='sub2api'||type==='none');const needsId=type==='newapi'&&Boolean($('accountKey').value.trim())&&!$('clearAccount').checked;$('accountUserId').required=needsId;$('accountUserId').disabled=type==='sub2api';$('userIdRequirement').textContent=needsId?'必填':'按需填写';$('userIdRequirement').className='field-tag '+(needsId?'required':'optional');
   $('accountHelp').textContent=type==='none'?'该服务未启用统计，可在下方测试模型列表连接。':'按需填写账户查询信息，完成后可在下方测试连接。';
 }
-function draftQuery(){return {baseUrl:$('baseUrl').value.trim(),siteUrl:siteFollowsBase?'':$('siteUrl').value.trim(),key:$('apiKey').value.trim(),protocol:$('protocol').value,adapter:$('adapter').value,accountKey:$('clearAccount').checked?'':$('accountKey').value.trim(),accountUserId:$('accountUserId').value.trim(),quotaPerUnit:$('quotaPerUnit').value,includeAccount:$('accountOptions').open};}
+function draftQuery(){return {baseUrl:$('baseUrl').value.trim(),siteUrl:siteFollowsBase?'':$('siteUrl').value.trim(),key:$('apiKey').value.trim(),modelFamily:'codex',protocol:'responses',adapter:$('adapter').value,accountKey:$('clearAccount').checked?'':$('accountKey').value.trim(),accountUserId:$('accountUserId').value.trim(),quotaPerUnit:$('quotaPerUnit').value,includeAccount:$('accountOptions').open};}
 function invalidateDetection(){detectEpoch++;draftDetection=null;const results=$('connectionResults');if(results)results.innerHTML='<span class="connection-idle">点击测试连接与权限</span>';for(const id of ['baseUrl','apiKey','siteUrl','accountKey','accountUserId','adapter'])$(id).removeAttribute('aria-invalid');const button=$('testConnection');if(button){button.disabled=false;button.textContent='连通性测试';}}
 async function testConnectionFromForm(){
   if(!$('providerDialog').open||!$('accountOptions').open)return;
@@ -198,10 +186,10 @@ async function testConnectionFromForm(){
   finally{if(current()){button.disabled=false;button.textContent='重新测试';}}
 }
 async function openEditor(id){
-  invalidateDetection();modelPicker.reset();const epoch=++editorEpoch,p=id?await call('providerDetails',{id}):null;if(epoch!==editorEpoch)return;$('providerForm').reset();$('providerId').value=p?.id||'';$('formTitle').textContent=p?'编辑中转':'添加中转';$('providerName').value=p?.name||'';$('baseUrl').value=p?.baseUrl||'';$('adapter').value=p?.adapter||'auto';$('protocol').value=p?.protocol||'';$('modelName').value=p?.model||'';$('reasoning').value=p?.reasoning||'';for(const field of ['providerPreset','protocol','reasoning'])$(field+'Picker').querySelector('button').removeAttribute('aria-invalid');$('modelName').removeAttribute('aria-invalid');$('accountUserId').value=p?.accountUserId||'';$('quotaPerUnit').value=p?.quotaPerUnit||500000;
-  $('providerPreset').value=providerFamily(p);
+  invalidateDetection();modelPicker.reset();const epoch=++editorEpoch,p=id?await call('providerDetails',{id}):null;if(epoch!==editorEpoch)return;$('providerForm').reset();$('providerId').value=p?.id||'';$('formTitle').textContent=p?'编辑中转':'添加中转';$('providerName').value=p?.name||'';$('baseUrl').value=p?.baseUrl||'';$('adapter').value=p?.adapter||'auto';$('modelName').value=requiresCodexSetup(p)?'':p?.model||'';$('reasoning').value=requiresCodexSetup(p)?'':p?.reasoning||'';for(const field of ['reasoning'])$(field+'Picker').querySelector('button').removeAttribute('aria-invalid');$('modelName').removeAttribute('aria-invalid');$('accountUserId').value=p?.accountUserId||'';$('quotaPerUnit').value=p?.quotaPerUnit||500000;
+  $('legacyProviderNotice').classList.toggle('hidden',!requiresCodexSetup(p));$('legacyProviderNotice').textContent=requiresCodexSetup(p)?'该记录来自旧版非 Codex 配置，原地址和密钥已保留。请确认中转支持 Responses，重新获取模型并选择默认模型和强度后保存；取消不会修改原记录。':'';
   const derived=(p?.baseUrl||'').replace(/\/+$/,'').replace(/\/v1$/i,'');siteFollowsBase=!p||!p.siteUrl||p.siteUrl===derived;$('siteUrl').value=p?.siteUrl||derived;$('notes').value=p?.notes||'';$('apiKey').value=p?.key||'';$('accountKey').value=p?.accountKey||'';setSecretVisibility('apiKey',false);setSecretVisibility('accountKey',false);
-  $('apiKey').required=!p;$('apiKeyRequirement').textContent=p?'已保存，可留空':'必填';$('apiKeyRequirement').className='field-tag '+(p?'optional':'required');$('apiKey').placeholder='sk-…';$('accountKey').placeholder='仅账户余额接口需要时填写';$('keyHint').textContent=p?'已填入保存的密钥，默认隐藏。点击小眼睛查看，修改后保存即可替换；清空后保存会保留原密钥。':'用于 Codex 调用和记录查询，默认隐藏，可点小眼睛查看。';$('accountOptions').open=Boolean(p);$('formError').textContent='';updateAccountForm();updateProtocolForm();modelPicker.restore(p);for(const id of ['providerPreset','protocol','adapter','reasoning'])filterPickers.get(id)?.sync();$('providerDialog').showModal();$('providerPresetPicker').querySelector('button').focus();$('providerDialog').querySelector('.dialog-body').scrollTop=0;
+  $('apiKey').required=!p;$('apiKeyRequirement').textContent=p?'已保存，可留空':'必填';$('apiKeyRequirement').className='field-tag '+(p?'optional':'required');$('apiKey').placeholder='sk-…';$('accountKey').placeholder='仅账户余额接口需要时填写';$('keyHint').textContent=p?'已填入保存的密钥，默认隐藏。点击小眼睛查看，修改后保存即可替换；清空后保存会保留原密钥。':'用于 Codex 调用和记录查询，默认隐藏，可点小眼睛查看。';$('accountOptions').open=Boolean(p);$('formError').textContent='';updateAccountForm();updateModelForm();if(!requiresCodexSetup(p))modelPicker.restore(p);for(const id of ['adapter','reasoning'])filterPickers.get(id)?.sync();$('providerDialog').showModal();$('providerName').focus();$('providerDialog').querySelector('.dialog-body').scrollTop=0;
 }
 function tableCard(title,headers,rows,empty='没有可显示的数据',className=''){return `<section class="table-card ${esc(className)}"><h2>${esc(title)}</h2><div class="table-scroll">${rows.length?`<table><thead><tr>${headers.map(h=>`<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>'<tr>'+row.map(cell=>`<td>${cell}</td>`).join('')+'</tr>').join('')}</tbody></table>`:`<div class="table-empty">${esc(empty)}</div>`}</div></section>`;}
 function trendRows(){const u=currentDetail?.usage;if(!u)return [];const hourly=u.mode==='logs'&&(chartGranularity==='hour'||chartGranularity==='auto'&&u.range?.start===u.range?.end);return [...(hourly?u.hourly||[]:u.daily||[])].sort((a,b)=>a.name.localeCompare(b.name));}
@@ -219,7 +207,7 @@ function renderDetail(r,loading=false){
   const provider=state.providers.find(item=>item.id===detailId);
   const modelSummary=modelUsageSummary(provider);
   if(provider?.adapter==='none'){
-    $('detailBody').innerHTML=modelSummary+`<div class="settings-card"><h2>模型调用 · ${esc(provider.model||'沿用当前模型')}</h2><p>该服务未启用余额与用量统计。保存后点击右上角“应用”，重启 Codex 或开启 CLI 新会话后使用。</p>${isBridged(provider)?'<div class="info-box">本地桥接需保持 Codex Relay 运行，可关闭窗口收起到托盘。模型的工具调用和图片能力由服务提供方决定。</div>':''}</div>`;
+    $('detailBody').innerHTML=modelSummary+`<div class="settings-card"><h2>Codex 模型调用 · ${esc(provider.model||'沿用当前模型')}</h2><p>该服务未启用余额与用量统计。保存后点击右上角“应用”，重启 Codex 或开启 CLI 新会话后使用。</p><div class="info-box">通过 Responses 直接连接中转，无需本地模型桥接；退出 Codex Relay 不影响 Codex 调用。</div></div>`;
     updateRefreshTime();syncModelFilter([]);syncRefreshControls();return;
   }
   updateRefreshTime();
@@ -288,32 +276,25 @@ document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()
 $('addProvider').onclick=()=>openEditor().catch(e=>toast(e.message,true));$('closeDialog').onclick=$('cancelDialog').onclick=closeEditor;$('adapter').onchange=()=>{invalidateDetection();updateAccountForm();};
 function setSecretVisibility(id,visible){const input=$(id),button=$(id+'Eye'),label=id==='apiKey'?'API 密钥':'账户访问令牌';input.type=visible?'text':'password';button.setAttribute('aria-pressed',String(visible));button.setAttribute('aria-label',(visible?'隐藏':'显示')+label);button.dataset.tooltip=(visible?'隐藏':'显示')+label;button.classList.toggle('revealed',visible);}
 function clearEditorSecrets(){for(const id of ['apiKey','accountKey']){$(id).value='';setSecretVisibility(id,false);}}
-function closeEditor(){invalidateDetection();modelPicker.reset();for(const id of ['providerPreset','protocol','adapter','reasoning'])filterPickers.get(id)?.close();editorEpoch++;clearEditorSecrets();$('providerDialog').close();}
+function closeEditor(){invalidateDetection();modelPicker.reset();for(const id of ['adapter','reasoning'])filterPickers.get(id)?.close();editorEpoch++;clearEditorSecrets();$('providerDialog').close();}
 for(const id of ['apiKey','accountKey'])$(id+'Eye').addEventListener('click',()=>setSecretVisibility(id,$(id).type==='password'));
 function derivedSite(value){if(!value.trim())return '';try{const u=new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(value)?value:'https://'+value);return u.origin+u.pathname.replace(/\/+$/,'').replace(/\/v1$/i,'');}catch{return '';}}
 $('baseUrl').addEventListener('input',()=>{if(siteFollowsBase)$('siteUrl').value=derivedSite($('baseUrl').value);});$('siteUrl').addEventListener('input',()=>{siteFollowsBase=!$('siteUrl').value.trim();});
 for(const id of ['baseUrl','apiKey','siteUrl','accountKey','accountUserId','quotaPerUnit','clearAccount'])$(id).addEventListener('input',()=>{invalidateDetection();updateAccountForm();});
 $('accountOptions').addEventListener('toggle',()=>{invalidateDetection();updateAccountForm();});
 $('testConnection').addEventListener('click',testConnectionFromForm);
-$('protocol').addEventListener('change',()=>{invalidateDetection();modelPicker.reset();updateProtocolForm();});
-$('providerPreset').addEventListener('change',()=>{
-  const preset=providerPresets[$('providerPreset').value];if(!preset)return;
-  if(!$('providerName').value.trim())$('providerName').value=preset.name;
-  invalidateDetection();updateProtocolForm();updateAccountForm();
-  for(const id of ['protocol','adapter','reasoning'])filterPickers.get(id)?.sync();
-});
-async function importCurrent(){try{const draft=await call('importCurrent');await openEditor();for(const [field,key] of Object.entries({providerName:'name',baseUrl:'baseUrl',apiKey:'key',modelName:'model',reasoning:'reasoning',protocol:'protocol'}))$(field).value=draft[key]||'';$('providerPreset').value=providerFamily(draft);updateProtocolForm();for(const id of ['providerPreset','protocol','reasoning'])filterPickers.get(id)?.sync();toast('已读取当前配置，请明确选择模型类型、确认调用协议，并获取模型列表选择默认模型和推理强度后保存。');}catch(e){toast(e.message,true);}}
+async function importCurrent(){try{const draft=await call('importCurrent');await openEditor();for(const [field,key] of Object.entries({providerName:'name',baseUrl:'baseUrl',apiKey:'key',modelName:'model',reasoning:'reasoning'}))$(field).value=draft[key]||'';updateModelForm();filterPickers.get('reasoning')?.sync();toast('已读取当前 Codex 配置，请获取模型列表并确认默认模型和推理强度后保存。');}catch(e){toast(e.message,true);}}
 $('importCurrent').onclick=importCurrent;
 $('providerForm').addEventListener('submit',async e=>{
   e.preventDefault();$('formError').textContent='';$('saveProvider').disabled=true;
-  const input={id:$('providerId').value||undefined,name:$('providerName').value,modelFamily:$('providerPreset').value,baseUrl:$('baseUrl').value,protocol:$('protocol').value,adapter:$('adapter').value,key:$('apiKey').value,model:$('modelName').value,reasoning:$('reasoning').value,discoveryToken:modelPicker.discoveryToken,accountKey:$('accountKey').value,accountUserId:$('accountUserId').value,quotaPerUnit:$('quotaPerUnit').value,siteUrl:siteFollowsBase?'':$('siteUrl').value,notes:$('notes').value,clearAccount:$('clearAccount').checked};
+  const input={id:$('providerId').value||undefined,name:$('providerName').value,baseUrl:$('baseUrl').value,modelFamily:'codex',protocol:'responses',adapter:$('adapter').value,key:$('apiKey').value,model:$('modelName').value,reasoning:$('reasoning').value,discoveryToken:modelPicker.discoveryToken,accountKey:$('accountKey').value,accountUserId:$('accountUserId').value,quotaPerUnit:$('quotaPerUnit').value,siteUrl:siteFollowsBase?'':$('siteUrl').value,notes:$('notes').value,clearAccount:$('clearAccount').checked};
   try{modelPicker.validate();setState(await call('saveProvider',input));closeEditor();toast('中转已保存。点击“应用”同步默认项和全部模型到 Codex。');}catch(error){$('formError').textContent=error.message;}finally{$('saveProvider').disabled=false;}
 });
 $('providerDialog').addEventListener('cancel',e=>{e.preventDefault();closeEditor();});
 $('providerDialog').addEventListener('close',()=>{if(!$('providerDialog').open)clearEditorSecrets();});
 async function handleProviderAction(e){
   const b=e.target.closest('[data-action]');if(!b)return;const id=b.closest('[data-id]')?.dataset.id,p=state.providers.find(p=>p.id===id);
-  try{switch(b.dataset.action){case'refresh':b.disabled=true;if(page==='details'&&detailId===id&&rangePeriod==='today')await refreshDetails();else{const result=await fetchProvider(id,'today');if(result)reportRefreshFailure(id,result);}break;case'edit':await openEditor(id);break;case'details':if(!draggedId)await openDetails(id);break;case'switch':b.disabled=true;setState(await call('switchProvider',{id}));toast(`已应用 ${p.name}。重启 Codex 或开启 CLI 新会话后生效。${isBridged(p)?'桥接期间请保持本应用运行（可收起到托盘）。':''}`);await openDetails(id);break;case'delete':if(await confirmAction('删除中转',`删除“${p.name}”及其保存的密钥？当前 Codex 配置不会因此更改。`)){setState(await call('deleteProvider',{id}));for(const key of cache.keys())if(key.startsWith(id+':'))cache.delete(key);toast('中转已删除。');if(detailId)await openDetails(detailId);}break;}}catch(error){toast((b.dataset.action==='refresh'?`${p?.name||'中转'} 刷新失败：`:'')+error.message,true);}finally{b.disabled=false;}
+  try{switch(b.dataset.action){case'refresh':b.disabled=true;if(page==='details'&&detailId===id&&rangePeriod==='today')await refreshDetails();else{const result=await fetchProvider(id,'today');if(result)reportRefreshFailure(id,result);}break;case'edit':await openEditor(id);break;case'details':if(!draggedId)await openDetails(id);break;case'switch':b.disabled=true;setState(await call('switchProvider',{id}));toast(`已应用 ${p.name}。重启 Codex 或开启 CLI 新会话后生效。`);await openDetails(id);break;case'delete':if(await confirmAction('删除中转',`删除“${p.name}”及其保存的密钥？当前 Codex 配置不会因此更改。`)){setState(await call('deleteProvider',{id}));for(const key of cache.keys())if(key.startsWith(id+':'))cache.delete(key);toast('中转已删除。');if(detailId)await openDetails(detailId);}break;}}catch(error){toast((b.dataset.action==='refresh'?`${p?.name||'中转'} 刷新失败：`:'')+error.message,true);}finally{b.disabled=false;}
 }
 $('providerList').addEventListener('click',handleProviderAction);
 $('detailActions').addEventListener('click',handleProviderAction);
@@ -356,17 +337,17 @@ function syncStartupSettings(){const settings=state.appSettings||{};$('launchAtL
 async function setStartupSetting(key,value){if(startupSettingsBusy)return;startupSettingsBusy=true;$('launchAtLogin').disabled=true;$('silentStartup').disabled=true;startupCard.setAttribute('aria-busy','true');try{setState(await call('setAppSetting',{key,value}));toast(key==='launchAtLogin'?(value?'已启用开机自动启动。':'已关闭开机自动启动。'):(value?'已启用静默启动。':'已关闭静默启动。'));}catch(error){toast(error.message,true);}finally{startupSettingsBusy=false;syncStartupSettings();}}
 $('launchAtLogin').addEventListener('change',event=>setStartupSetting('launchAtLogin',event.target.checked));
 $('silentStartup').addEventListener('change',event=>setStartupSetting('silentStartup',event.target.checked));
-for(const id of ['providerPreset','protocol','adapter','reasoning']){
+for(const id of ['adapter','reasoning']){
   const source=$(id),label=source.closest('label').querySelector('.field-label'),root=document.createElement('div');
   label.id=id+'Label';root.id=id+'Picker';root.className='filter-picker editor-select';source.before(root);source.classList.add('filter-source');source.tabIndex=-1;source.setAttribute('aria-hidden','true');
   enhanceFilter(id,'');source.addEventListener('change',()=>filterPickers.get(id).sync());
 }
 function syncModelRequirement(){const input=$('modelName');input.classList.toggle('is-required-empty',!input.value.trim());if(input.validity.valid)input.removeAttribute('aria-invalid');}
 for(const event of ['input','change'])$('modelName').addEventListener(event,syncModelRequirement);
-for(const [id,message] of Object.entries({providerPreset:'请选择模型类型。',protocol:'请选择模型调用协议。',modelName:'请先获取模型列表，再明确选择默认模型。',reasoning:'请选择推理强度；不指定参数时请手动选择“服务默认”。'})){
+for(const [id,message] of Object.entries({modelName:'请先获取模型列表，再明确选择默认模型。',reasoning:'请选择推理强度；不指定参数时请手动选择“服务默认”。'})){
   $(id).addEventListener('invalid',event=>{event.preventDefault();const target=id==='modelName'?$(id):$(id+'Picker').querySelector('button');target.setAttribute('aria-invalid','true');if($('providerForm').querySelector(':invalid')===$(id)){$('formError').textContent=message;target.focus();target.scrollIntoView({block:'nearest'});}});
 }
-const modelPicker=new RelayModelPicker({fetch:input=>call('listModels',input),getCredentials:()=>({baseUrl:$('baseUrl').value.trim(),key:$('apiKey').value.trim(),protocol:$('protocol').value}),isOpen:()=>$('providerDialog').open});
+const modelPicker=new RelayModelPicker({fetch:input=>call('listModels',input),getCredentials:()=>({baseUrl:$('baseUrl').value.trim(),key:$('apiKey').value.trim(),modelFamily:'codex',protocol:'responses'}),isOpen:()=>$('providerDialog').open});
 $('chooseConfigDir').onclick=async()=>{try{setState(await call('chooseConfigDir'));}catch(e){toast(e.message,true);}};$('openDataDir').onclick=async()=>{try{await call('openDataDir');}catch(e){toast(e.message,true);}};
 $('refreshDetail').onclick=()=>refreshDetails();$('period').onchange=onRangeChange;$('modelFilter').onchange=()=>{rememberDetailView();refreshDetails();};
 const dateIcon='<svg class="filter-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4M17 3v4M3 10h18M8 14h2M14 14h2M8 17h2"/></svg>';
