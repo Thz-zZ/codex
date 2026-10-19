@@ -12,7 +12,7 @@
 
 ## 版本与应用打包
 
-当前版本为 **v1.2.6**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
+当前版本为 **v1.2.8**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
 
 运行 `build-release.ps1` 生成可直接运行的 Windows x64 应用文件夹。可通过 `-OutputDirectory` 指定新输出目录。发布包包含应用与会话服务 EXE、DLL、界面、许可、会话管理说明及版本记录。
 
@@ -34,13 +34,17 @@
 
 添加中转的入口位于左侧顶部品牌栏右侧的“＋”图标，原来的大号添加按钮已移除；“我的中转”右侧仍可导入当前 Codex 配置。
 
-填写支持 Codex Responses 的中转 API 基础地址、调用密钥和中转名称，点击“获取模型”读取密钥可见的完整列表。**默认模型和推理强度仍须逐项明确选择**，不会自动代选；“服务默认”也需要主动选择。不能把列表外的名称作为默认项。模型 ID 由中转返回，不硬编码官方名称，以兼容自定义别名；请确认所选模型支持 Codex Responses。应用只把配置写入 Codex，不在本地代理、转换或拦截生成请求；退出本应用不影响已配置的 Codex 直连调用。
+填写支持 Codex Responses 的中转 API 基础地址、调用密钥和中转名称，点击“获取模型”读取密钥可见的完整列表。**默认模型须从列表中明确选择，不会自动代选；默认推理强度可选**，不指定时跟随 Codex，指定后仅设置默认项，不锁定其他强度。不能把列表外的名称作为默认项。模型 ID 由中转返回，不硬编码官方名称，以兼容自定义别名；请确认所选模型支持 Codex Responses。应用只把配置写入 Codex，不在本地代理、转换或拦截生成请求；退出本应用不影响已配置的 Codex 直连调用。
 
-地址、API 密钥变更后必须重新获取模型。编辑现有 Codex 记录可复用已保存列表，变更默认模型无需重新查询。应用中转会写入 `model_catalog_json` 完整模型目录，显示名与模型 ID 一致，默认项优先排列；界面搜索一次最多显示 200 项，但保存及同步不截断列表。应用后需重启 Codex 或开启 CLI 新会话，旧会话不会被强制重置模型。推理强度写入 Codex 配置；选择“服务默认”会清除遗留的 `model_reasoning_effort`，不会写入无效的 `default` 值。
+地址、API 密钥变更后必须重新获取模型。编辑现有 Codex 记录可复用已保存列表，变更默认模型无需重新查询。应用中转会写入 `model_catalog_json` 完整模型目录，显示名与模型 ID 一致，默认项优先排列；界面搜索一次最多显示 200 项，但保存及同步不截断列表。应用后需重启 Codex 或开启 CLI 新会话，旧会话不会被强制重置模型。指定的默认强度写入 Codex 配置；选择“跟随 Codex”会清除遗留的 `model_reasoning_effort`，不会写入无效的 `default` 值。Responses 目录保留 `low / medium / high / xhigh / max / ultra` 六档；选项不代表已验证上游支持，请按中转和模型实际能力选择。
+
+模型目录采用 schema v2，使用独立内容哈希快照，不包含地址或密钥，不修改 Codex 安装文件或内置缓存。上下文元数据使用客户端兼容预算 **272000 Token / 95%**，不是对上游模型容量的承诺；旧目录已有的独立预算及 `model_context_window` 配置覆盖会保留。上下文用量来自原生真实 Token 通知，空会话或未报告用量时不伪造占用。
+
+启动时安全升级当前 Responses 直连配置引用的本应用旧模型目录：保存加密配置备份，仅替换目录引用，保留模型、默认强度、上下文覆盖、注释和未应用的中转编辑。旧快照不覆盖；外部目录、哈希不匹配或损坏的目录、链接路径、旧桥接和非 Responses 配置不自动升级。升级后需重启 Codex 加载目录，配置备份可恢复原始目录引用。
 
 ### 历史记录
 
-旧版非 Codex 类型和桥接中转的记录、加密密钥、账户查询设置及用量历史原样保留，不会在启动时删除、自动转换或重写用户的 Codex 配置。详情显示“需重新配置”，不能直接应用。编辑时保留原地址、密钥、名称及账户信息，提示确认上游支持 Responses，并要求重新获取模型、选择默认模型与强度后保存。取消编辑不会修改原记录。旧版本地模型桥接不再启动；若当前 Codex 配置仍指向旧桥接地址，需应用一个支持 Responses 的中转后再使用。旧本地桥接地址和本地凭据不能作为上游中转导入。
+旧版非 Codex 类型和桥接中转的记录、加密密钥、账户查询设置及用量历史原样保留，不会因旧记录而在启动时删除数据、自动转换协议或应用中转。详情显示“需重新配置”，不能直接应用。编辑时保留原地址、密钥、名称及账户信息，提示确认上游支持 Responses，并要求重新获取模型、选择默认模型后保存，默认强度可选。取消编辑不会修改原记录。旧版本地模型桥接不再启动；若当前 Codex 配置仍指向旧桥接地址，需应用一个支持 Responses 的中转后再使用。旧本地桥接地址和本地凭据不能作为上游中转导入。
 
 ### 地址、统计与缓存
 
@@ -72,10 +76,10 @@
 
 运行 `tests/test-window-placement.ps1 -ToolchainRoot <依赖目录>` 验证窗口状态读取、屏幕边界校验，以及独立进程之间的普通窗口、最大化、最小化和静默启动恢复。测试仅使用 build 内的独立偏好文件，不接触实际用户的窗口设置。
 
-运行 `tests/test-codex-provider.ps1 -ToolchainRoot <依赖目录>` 验证 Codex / Responses 限制、默认模型与推理强度、完整模型列表、密钥隔离、旧数据保留与显式迁移、配置应用和导入，并通过本机 Codex CLI 验证模型目录与显示名同步。可通过 `-CodexPath` 指定 CLI，或用 `-SkipCli` 只运行原生回归。测试使用 build 内的独立配置与合成密钥，不访问真实模型服务或修改用户的 Codex 配置；实际服务可用性需用户自己的 API 密钥验证。
+运行 `tests/test-codex-provider.ps1 -ToolchainRoot <依赖目录>` 验证 Codex / Responses 限制、默认模型与推理强度、完整模型列表、密钥隔离、旧数据保留与显式迁移、配置应用和导入，并验证旧模型目录升级、加密备份恢复与外部文件隔离。通过本机 Codex CLI 验证完整模型目录、六档强度和显示名，以及 Responses 模拟接口上的真实 Token 通知（272000 × 95% = 258400）、请求强度覆盖默认项、独立预算覆盖、空会话和未返回用量。可通过 `-CodexPath` 指定 CLI，或用 `-SkipCli` 只运行原生回归。测试使用 build 内的独立配置与合成密钥，不访问真实模型服务或修改用户的 Codex 配置；实际服务可用性需用户自己的 API 密钥验证。
 
 运行 `node --test tests/detail-cache.test.cjs` 验证缓存淘汰、容量计算及大量查询下的数据保留上限。
 
 使用会话虚拟环境运行 `python tests/measure-memory.py "build/Codex Relay Lite.exe"`，可执行隔离桌面 smoke 并采样主程序及全部子进程的工作集和私有内存，结果写入对应构建目录的 `smoke-data/process-memory.json`。工作集合计可能包含共享页，不能直接当作唯一物理内存用量。
 
-使用会话虚拟环境运行 `python -m pytest session-backend/tests -q`。桌面测试先运行 `python tests/seed-session-fixture.py` 创建 build 内的合成会话，再执行 `build/Codex Relay Lite.exe --smoke-test`；运行 `node tests/generate-fixtures.cjs` 后，可通过 `--self-test` 验证原有中转逻辑。期望值来自独立旧版参考快照，生成时仅平移日期，无需其他项目目录。测试不操作真实用户会话。
+使用会话虚拟环境运行 `python -m pytest session-backend/tests -q`。桌面测试先运行 `python tests/seed-session-fixture.py` 创建 build 内的合成会话，再执行 `build/Codex Relay Lite.exe --smoke-test`；运行 `node tests/generate-fixtures.cjs` 后，可通过 `--self-test` 验证原有中转逻辑；独立构建目录可作为夹具输出参数，例如 `node tests/generate-fixtures.cjs build/merge-v1.2.8-20261019/usage-fixtures.json`。期望值来自独立旧版参考快照，生成时仅平移日期，无需其他项目目录。测试不操作真实用户会话。

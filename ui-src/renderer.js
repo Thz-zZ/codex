@@ -151,7 +151,7 @@ function protocolLabel(provider){return requiresCodexSetup(provider)?'旧配置 
 function modelUsageSummary(provider){
   if(!provider)return '';
   if(requiresCodexSetup(provider))return '<section class="notice error model-usage"><strong>旧中转需重新配置</strong><div>本应用现在仅支持 Codex Responses 直连。原记录和密钥仍保留；请编辑并确认上游支持 Responses，重新获取模型列表后保存、应用。</div></section>';
-  const effort=!provider.reasoning||provider.reasoning==='default'?'服务默认（未发送强度）':provider.reasoning;
+  const effort=!provider.reasoning||provider.reasoning==='default'?'跟随 Codex（未指定默认强度）':provider.reasoning;
   return `<section class="notice model-usage"><strong>模型参数</strong><div>已保存${provider.modelSelection==='catalog'?'默认模型':''}：${esc(provider.model||'未指定模型')} · 强度 ${esc(effort)}（修改后需应用）</div>${provider.modelSelection==='catalog'?`<div>已保存 ${fmt(provider.models?.length||0)} 个模型，应用后可在 Codex 内直接切换；此处所选仅作默认。</div>`:'<div>Responses 直连按 Codex 实际请求调用；修改配置后旧会话需重新选择或新建。</div>'}</section>`;
 }
 function updateModelForm(){
@@ -159,7 +159,8 @@ function updateModelForm(){
   $('modelHelp').textContent='先获取中转的完整模型列表，再从列表中明确选择一个支持 Codex Responses 的默认模型（不会自动选择）。应用时同步全部模型，重启 Codex 后可在其中直接切换；这里所选仅作默认，不锁定模型。';
   $('modelName').placeholder='请先获取模型，再选择默认模型';syncModelRequirement();
   for(const option of $('reasoning').options)option.disabled=!option.value;
-  $('reasoningHelp').textContent='请选择中转站和模型支持的强度，应用后写入 Codex 配置。不指定参数时，也必须手动选择“服务默认”。';
+  if(!$('reasoning').value)$('reasoning').value='default';
+  $('reasoningHelp').textContent='默认强度可选，不指定时跟随 Codex；指定后仅作为默认，仍可在 Codex 内选择 low、medium、high、xhigh、max、ultra，实际支持情况由中转和模型决定。';
   filterPickers.get('reasoning')?.sync();
 }
 function updateAccountForm(){
@@ -186,8 +187,8 @@ async function testConnectionFromForm(){
   finally{if(current()){button.disabled=false;button.textContent='重新测试';}}
 }
 async function openEditor(id){
-  invalidateDetection();modelPicker.reset();const epoch=++editorEpoch,p=id?await call('providerDetails',{id}):null;if(epoch!==editorEpoch)return;$('providerForm').reset();$('providerId').value=p?.id||'';$('formTitle').textContent=p?'编辑中转':'添加中转';$('providerName').value=p?.name||'';$('baseUrl').value=p?.baseUrl||'';$('adapter').value=p?.adapter||'auto';$('modelName').value=requiresCodexSetup(p)?'':p?.model||'';$('reasoning').value=requiresCodexSetup(p)?'':p?.reasoning||'';for(const field of ['reasoning'])$(field+'Picker').querySelector('button').removeAttribute('aria-invalid');$('modelName').removeAttribute('aria-invalid');$('accountUserId').value=p?.accountUserId||'';$('quotaPerUnit').value=p?.quotaPerUnit||500000;
-  $('legacyProviderNotice').classList.toggle('hidden',!requiresCodexSetup(p));$('legacyProviderNotice').textContent=requiresCodexSetup(p)?'该记录来自旧版非 Codex 配置，原地址和密钥已保留。请确认中转支持 Responses，重新获取模型并选择默认模型和强度后保存；取消不会修改原记录。':'';
+  invalidateDetection();modelPicker.reset();const epoch=++editorEpoch,p=id?await call('providerDetails',{id}):null;if(epoch!==editorEpoch)return;$('providerForm').reset();$('providerId').value=p?.id||'';$('formTitle').textContent=p?'编辑中转':'添加中转';$('providerName').value=p?.name||'';$('baseUrl').value=p?.baseUrl||'';$('adapter').value=p?.adapter||'auto';$('modelName').value=requiresCodexSetup(p)?'':p?.model||'';$('reasoning').value=requiresCodexSetup(p)?'default':p?.reasoning||'default';for(const field of ['reasoning'])$(field+'Picker').querySelector('button').removeAttribute('aria-invalid');$('modelName').removeAttribute('aria-invalid');$('accountUserId').value=p?.accountUserId||'';$('quotaPerUnit').value=p?.quotaPerUnit||500000;
+  $('legacyProviderNotice').classList.toggle('hidden',!requiresCodexSetup(p));$('legacyProviderNotice').textContent=requiresCodexSetup(p)?'该记录来自旧版非 Codex 配置，原地址和密钥已保留。请确认中转支持 Responses，重新获取模型并选择默认模型后保存，默认强度可选；取消不会修改原记录。':'';
   const derived=(p?.baseUrl||'').replace(/\/+$/,'').replace(/\/v1$/i,'');siteFollowsBase=!p||!p.siteUrl||p.siteUrl===derived;$('siteUrl').value=p?.siteUrl||derived;$('notes').value=p?.notes||'';$('apiKey').value=p?.key||'';$('accountKey').value=p?.accountKey||'';setSecretVisibility('apiKey',false);setSecretVisibility('accountKey',false);
   $('apiKey').required=!p;$('apiKeyRequirement').textContent=p?'已保存，可留空':'必填';$('apiKeyRequirement').className='field-tag '+(p?'optional':'required');$('apiKey').placeholder='sk-…';$('accountKey').placeholder='仅账户余额接口需要时填写';$('keyHint').textContent=p?'已填入保存的密钥，默认隐藏。点击小眼睛查看，修改后保存即可替换；清空后保存会保留原密钥。':'用于 Codex 调用和记录查询，默认隐藏，可点小眼睛查看。';$('accountOptions').open=Boolean(p);$('formError').textContent='';updateAccountForm();updateModelForm();if(!requiresCodexSetup(p))modelPicker.restore(p);for(const id of ['adapter','reasoning'])filterPickers.get(id)?.sync();$('providerDialog').showModal();$('providerName').focus();$('providerDialog').querySelector('.dialog-body').scrollTop=0;
 }
@@ -283,7 +284,7 @@ $('baseUrl').addEventListener('input',()=>{if(siteFollowsBase)$('siteUrl').value
 for(const id of ['baseUrl','apiKey','siteUrl','accountKey','accountUserId','quotaPerUnit','clearAccount'])$(id).addEventListener('input',()=>{invalidateDetection();updateAccountForm();});
 $('accountOptions').addEventListener('toggle',()=>{invalidateDetection();updateAccountForm();});
 $('testConnection').addEventListener('click',testConnectionFromForm);
-async function importCurrent(){try{const draft=await call('importCurrent');await openEditor();for(const [field,key] of Object.entries({providerName:'name',baseUrl:'baseUrl',apiKey:'key',modelName:'model',reasoning:'reasoning'}))$(field).value=draft[key]||'';updateModelForm();filterPickers.get('reasoning')?.sync();toast('已读取当前 Codex 配置，请获取模型列表并确认默认模型和推理强度后保存。');}catch(e){toast(e.message,true);}}
+async function importCurrent(){try{const draft=await call('importCurrent');await openEditor();for(const [field,key] of Object.entries({providerName:'name',baseUrl:'baseUrl',apiKey:'key',modelName:'model',reasoning:'reasoning'}))$(field).value=draft[key]||(field==='reasoning'?'default':'');updateModelForm();filterPickers.get('reasoning')?.sync();toast('已读取当前 Codex 配置，请获取模型列表并确认默认模型后保存；默认推理强度可选。');}catch(e){toast(e.message,true);}}
 $('importCurrent').onclick=importCurrent;
 $('providerForm').addEventListener('submit',async e=>{
   e.preventDefault();$('formError').textContent='';$('saveProvider').disabled=true;
@@ -344,7 +345,7 @@ for(const id of ['adapter','reasoning']){
 }
 function syncModelRequirement(){const input=$('modelName');input.classList.toggle('is-required-empty',!input.value.trim());if(input.validity.valid)input.removeAttribute('aria-invalid');}
 for(const event of ['input','change'])$('modelName').addEventListener(event,syncModelRequirement);
-for(const [id,message] of Object.entries({modelName:'请先获取模型列表，再明确选择默认模型。',reasoning:'请选择推理强度；不指定参数时请手动选择“服务默认”。'})){
+for(const [id,message] of Object.entries({modelName:'请先获取模型列表，再明确选择默认模型。'})){
   $(id).addEventListener('invalid',event=>{event.preventDefault();const target=id==='modelName'?$(id):$(id+'Picker').querySelector('button');target.setAttribute('aria-invalid','true');if($('providerForm').querySelector(':invalid')===$(id)){$('formError').textContent=message;target.focus();target.scrollIntoView({block:'nearest'});}});
 }
 const modelPicker=new RelayModelPicker({fetch:input=>call('listModels',input),getCredentials:()=>({baseUrl:$('baseUrl').value.trim(),key:$('apiKey').value.trim(),modelFamily:'codex',protocol:'responses'}),isOpen:()=>$('providerDialog').open});
@@ -364,4 +365,4 @@ function syncRefreshControls(){
 }
 function updateCountdown(){if(document.hidden)return;const editing=syncRefreshControls();if(auto&&!editing&&Date.now()>=nextRefresh&&!pending.size&&!allBusy){nextRefresh=Date.now()+60000;if(page==='details'&&state.providers.find(p=>p.id===detailId)?.active&&rangePeriod==='today')refreshDetails(false);else refreshAll();}}
 setInterval(updateCountdown,1000);
-window.appReady=(async()=>{try{if(window.relay.detailViewState)for(const [id,value] of Object.entries(await call('detailViewState')))detailViews.set(id,value);setState(await call('state'));window.relayUiReady=true;if(detailId){await openDetails(detailId);if(auto&&(!currentDetail?.usage||!cacheFresh(currentDetail)))await refreshDetails(false);}}catch(error){$('providerList').innerHTML=`<div class="notice error">${esc(error.message)}</div>`;toast(error.message,true);}})();
+window.appReady=(async()=>{try{if(window.relay.detailViewState)for(const [id,value] of Object.entries(await call('detailViewState')))detailViews.set(id,value);setState(await call('state'));window.relayUiReady=true;if(state.catalogUpgraded)toast('已升级旧模型目录并备份配置；请重启 Codex，恢复推理强度选项和上下文窗口数据。');if(detailId){await openDetails(detailId);if(auto&&(!currentDetail?.usage||!cacheFresh(currentDetail)))await refreshDetails(false);}}catch(error){$('providerList').innerHTML=`<div class="notice error">${esc(error.message)}</div>`;toast(error.message,true);}})();

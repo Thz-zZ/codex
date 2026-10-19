@@ -7,6 +7,7 @@ internal static class CodexProviderTestHost {
     static int Main(string[] args) {
         try {
             string directory=Path.GetFullPath(args[0]);Directory.CreateDirectory(directory);
+            if(args.Length==2&&args[1]=="--check-links"){var checks=new List<string>();ModelCatalogChecks.RunLinked(directory,checks);Console.WriteLine(J.Encode(J.Map("ok",true,"checks",checks)));return 0;}
             if(args.Length==1){var checks=new List<string>();ModelCatalogChecks.Run(directory,checks);ModelsChecks.Run(directory,checks).GetAwaiter().GetResult();DraftChecks.Run(directory,checks).GetAwaiter().GetResult();CodexOnlyChecks.Run(directory,checks).GetAwaiter().GetResult();Console.WriteLine(J.Encode(J.Map("ok",true,"checks",checks)));return 0;}
             string config=Path.Combine(directory,"config");Directory.CreateDirectory(config);
             {

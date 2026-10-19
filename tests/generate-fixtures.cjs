@@ -12,7 +12,7 @@ function rebase(value,key){
   if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,rebase(v,k)]));
   return value;
 }
-const destination=path.resolve(__dirname,'../build/usage-fixtures.json');
+const destination=path.resolve(process.argv[2]||path.join(__dirname,'../build/usage-fixtures.json'));
 fs.mkdirSync(path.dirname(destination),{recursive:true});
 fs.writeFileSync(destination,JSON.stringify(rebase(fixtures)));
 console.log('Prepared',fixtures.length,'independent statistics fixtures for',today);

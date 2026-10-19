@@ -59,8 +59,8 @@
   check(!$('providerPreset')&&!$('protocol')&&!$('providerPresetPicker')&&!$('protocolPicker'),'model family and protocol dropdowns are removed');
   check(!document.querySelector('.fixed-provider-value,.codex-connection')&&!$('protocolHelp'),'redundant model family, protocol display and explanatory row are completely removed');
   check($('providerDialog').querySelector('.dialog-body label').contains($('providerName')),'provider name is the first visible form field with no obsolete settings row above it');
-  check(['modelName','reasoning'].every(id=>$(id).required&&$(id).value===''),'default model and reasoning remain explicit required selections');
-  check($('reasoningValue').textContent.startsWith('请选择')&&$('reasoningPicker').classList.contains('is-required-empty')&&$('reasoningPicker').querySelector('button').getAttribute('aria-required')==='true','reasoning visibly requests an explicit selection');
+  check($('modelName').required&&$('modelName').value===''&&!$('reasoning').required&&$('reasoning').value==='default','default model remains required and default reasoning is optional');
+  check($('reasoningValue').textContent.includes('跟随 Codex')&&!$('reasoningPicker').classList.contains('is-required-empty')&&$('reasoningPicker').querySelector('button').getAttribute('aria-required')==='false','reasoning visibly follows Codex by default without a required marker');
   check($('modelName').classList.contains('is-required-empty')&&$('modelName').placeholder.includes('选择默认模型'),'default model is visibly empty and required without submitting');
   check($('baseUrl').value===''&&$('adapter').value==='auto','Codex starts with a manually configured relay and no official endpoint preset');
   check(draftQuery().modelFamily==='codex'&&draftQuery().protocol==='responses','Codex Responses remains fixed internally without a visible settings row');
@@ -75,16 +75,16 @@
   closeEditor();await openEditor(legacy.id);
   check(!$('legacyProviderNotice').classList.contains('hidden')&&$('legacyProviderNotice').textContent.includes('重新获取模型'),'legacy editor visibly requires Codex reconfiguration');
   check($('baseUrl').value===legacy.baseUrl&&$('apiKey').value===legacy.key&&$('accountKey').value===legacy.accountKey&&$('providerName').value===legacy.name&&$('adapter').value===legacy.adapter&&$('siteUrl').value===legacy.siteUrl&&$('notes').value===legacy.notes,'legacy edit preserves relay, account credentials and notes');
-  check($('modelName').value===''&&$('reasoning').value===''&&!modelPicker.loaded&&modelCalls===0,'legacy catalogs and selections are not silently relabelled as Codex or fetched automatically');
+  check($('modelName').value===''&&$('reasoning').value==='default'&&!modelPicker.loaded&&modelCalls===0,'legacy catalogs and selections are not silently relabelled as Codex or fetched automatically');
   check(draftQuery().modelFamily==='codex'&&draftQuery().protocol==='responses','legacy edits can only issue Codex Responses requests');
   closeEditor();window.relay=originalDetailsApi;
   const priorDetailId=detailId;state.providers.push(legacy);detailId=legacy.id;renderSelectedHeader();
   check($('detailActions').querySelector('[data-action="switch"]').disabled&&$('selectedStatus').textContent==='需重新配置','legacy records cannot be applied from the detail header');
   state.providers=state.providers.filter(p=>p.id!==legacy.id);detailId=priorDetailId;renderSelectedHeader();
-  await openEditor();check(['modelName','reasoning'].every(id=>$(id).value==='')&&$('legacyProviderNotice').classList.contains('hidden'),'fresh Codex entry clears the legacy warning without adding obsolete choices');
+  await openEditor();check($('modelName').value===''&&$('reasoning').value==='default'&&$('legacyProviderNotice').classList.contains('hidden'),'fresh Codex entry clears the legacy warning without adding obsolete choices');
   $('providerName').value='未保存识别测试';$('baseUrl').value='https://fixture-draft.example/v1';$('baseUrl').dispatchEvent(new Event('input',{bubbles:true}));$('apiKey').value='sk-draft-smoke-fake-only';
   check($('providerName').placeholder==='请输入中转名称'&&$('apiKey').required&&$('apiKeyRequirement').textContent==='必填','neutral name and clear required fields');
-  for(const selections of [{modelFamily:'claude'},{modelFamily:'gemini'},{protocol:'chat-completions'},{protocol:'anthropic'},{model:''},{reasoning:''}]){
+  for(const selections of [{modelFamily:'claude'},{modelFamily:'gemini'},{protocol:'chat-completions'},{protocol:'anthropic'},{model:''},{reasoning:'invalid'}]){
     const rejected=await window.relay.saveProvider({name:'invalid-selection-fixture',baseUrl:'https://fixture-selection.example/v1',key:'fixture-selection-key',modelFamily:'codex',protocol:'responses',model:'fixture-model',reasoning:'default',...selections});
     check(!rejected.ok&&(await call('state')).providers.length===count,'save API rejects removed providers/protocols and missing required selections');
   }
@@ -94,7 +94,10 @@
   check($('modelName').value==='','fetching does not choose default silently');
   $('modelName').value='mini';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));
   check(modelPicker.options.length===1,'model list searchable');$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='gpt-codex-mini','dropdown chooses model');
-  $('providerForm').requestSubmit();check($('providerDialog').open&&state.providers.length===count&&$('formError').textContent.includes('推理强度')&&$('reasoningPicker').querySelector('button').getAttribute('aria-invalid')==='true','saving with only a model requires explicit reasoning and focuses the visible selector');
+  const optionalApi=window.relay;let optionalSaved;
+  window.relay={...optionalApi,saveProvider:async input=>{optionalSaved=input;return {ok:false,error:'optional-reasoning-fixture'};}};
+  $('providerForm').requestSubmit();await waitFor(()=>optionalSaved&&!$('saveProvider').disabled,'optional reasoning reaches the save API');
+  check(optionalSaved.reasoning==='default'&&$('providerDialog').open&&state.providers.length===count,'saving a chosen model does not require selecting reasoning');window.relay=optionalApi;
   $('modelName').value='custom-model';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));$('modelName').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));let unlisted=false;try{modelPicker.validate();}catch{unlisted=true;}check(unlisted,'unlisted text cannot be used as the default model');
   modelPicker.open(false);check(!modelPicker.options.some(option=>option.id===''),'Responses cannot inherit a Codex model');$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='gpt-codex','first actual model selected');
   modelPicker.open(false);$('modelMenu').querySelector('[data-model-index="1"]').click();check($('modelName').value==='gpt-codex-mini','model selected again');
@@ -155,7 +158,7 @@
   check(draftQuery().modelFamily==='codex'&&draftQuery().protocol==='responses'&&modelCalls===fetchedBeforeEdit,'editing keeps fixed Codex Responses settings without automatic HTTP');
   $('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save Codex relay with existing custom settings');
   await openEditor(saved.id);check($('baseUrl').value===relayBefore.baseUrl&&$('apiKey').value===relayBefore.key&&$('adapter').value===relayBefore.adapter&&$('siteUrl').value===relayBefore.siteUrl,'reopening a Codex relay preserves custom endpoint, credentials and statistics settings');
-  filterPickers.get('reasoning').open();$('reasoningMenu').querySelector('[data-index="1"]').click();$('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save explicit service default');
+  filterPickers.get('reasoning').open();$('reasoningMenu').querySelector('[data-index="0"]').click();$('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save explicit service default');
   await openEditor(saved.id);check($('reasoning').value==='default'&&$('modelName').value==='gpt-codex-mini','explicit service default survives saving and reopening without discarding the chosen model');closeEditor();
   setState(await call('deleteProvider',{id:saved.id}));
   check(state.providers.length===count,'test draft cleaned up');

@@ -13,6 +13,7 @@ internal sealed class Store {
     public string ConfigDir {get {return J.Str(Data,"configDir");}}
     public readonly Secure Secure;
     public Dictionary<string,object> Data;
+    public bool CatalogUpgraded {get;private set;}
     public Store(string dir,string configDir,Secure secure) {
         Dir=dir;Secure=secure;File=Path.Combine(dir,"providers.json");
         Data=J.Obj(J.Read(File,J.Map("version",1,"providers",new List<object>(),"history",new List<object>(),"snapshots",new List<object>(),"appSettings",J.Map("launchAtLogin",false,"silentStartup",false),"configDir",configDir)));
@@ -43,7 +44,7 @@ internal sealed class Store {
     internal string ActiveProviderId(){var doc=ReadConfig();return ActiveId(doc,ConfigInfo(doc),Providers);}
     internal IEnumerable<string> ProviderIds {get{return Providers.Select(p=>J.Str(p,"id"));}}
     public object List(){var doc=ReadConfig();var info=ConfigInfo(doc);var providers=Providers;string active=ActiveId(doc,info,providers);
-        return J.Map("providers",providers.Select(p=>{var x=Pub(p);x["active"]=J.Str(p,"id")==active;return x;}).ToList(),"usageCache",UsageCache.Load(this),"appSettings",J.Get(Data,"appSettings"),"config",info,"history",History.Take(100).Cast<object>().ToList(),"dataDir",Dir);}
+        return J.Map("providers",providers.Select(p=>{var x=Pub(p);x["active"]=J.Str(p,"id")==active;return x;}).ToList(),"usageCache",UsageCache.Load(this),"appSettings",J.Get(Data,"appSettings"),"config",info,"history",History.Take(100).Cast<object>().ToList(),"dataDir",Dir,"catalogUpgraded",CatalogUpgraded);}
     static bool SameBaseUrl(string left,string right){try{return BaseUrl(left)==BaseUrl(right);}catch{return left==right;}}
     public object ConfigInfo(){return ConfigInfo(ReadConfig());}
     object ConfigInfo(object doc){if(doc==null)return J.Map("exists",false,"dir",ConfigDir,"model","","reasoning","","provider","","baseUrl","");string id=J.Str(doc,"model_provider","openai");var providers=J.Obj(J.Get(doc,"model_providers"));var p=J.Obj(J.Get(providers,id));return J.Map("exists",true,"dir",ConfigDir,"provider",id,"model",J.Str(doc,"model"),"reasoning",J.Str(doc,"model_reasoning_effort"),"baseUrl",J.Str(p,"base_url"),"hasKey",J.Str(p,"experimental_bearer_token")!="");}
@@ -53,9 +54,9 @@ internal sealed class Store {
     public object Upsert(object input,bool requireSelections=false,bool requireDiscovery=false){
         var id=J.Str(input,"id");var old=id==""?null:Find(id);string name=J.Str(input,"name").Trim();if(name.Length<1||name.Length>80)throw J.Error("名称需为 1–80 个字符。");
         string protocol=ModelProtocol.Protocol(input),model=J.Str(input,"model").Trim(),reasoning=J.Str(input,"reasoning").Trim();
+        if(reasoning=="")reasoning="default";
         if(requireSelections){
             if(model=="")throw J.Error("请获取模型列表并选择默认模型。");
-            if(reasoning=="")throw J.Error("请选择推理强度；不指定参数时请手动选择“服务默认”。");
             if(!new[]{"default","low","medium","high","xhigh","max","ultra"}.Contains(reasoning))throw J.Error("请选择有效的推理强度。");
         }
         string baseUrl=BaseUrl(J.Str(input,"baseUrl")),siteRaw=J.Str(input,"siteUrl").Trim(),site=BaseUrl(siteRaw==""?baseUrl:siteRaw),adapter=J.Str(input,"adapter","auto");
@@ -71,7 +72,7 @@ internal sealed class Store {
             string effectiveKey=key!=""?key:Key(old),discovery=J.Str(input,"discoveryToken");
             if(discovery!="")models=Models.Resolve(discovery,input,effectiveKey);
             else if(ModelProtocol.IsCodex(old)&&J.Str(old,"modelSelection")=="catalog"&&Models.Fingerprint(old,Key(old))==Models.Fingerprint(input,effectiveKey))models=Models.Saved(old);
-            else throw J.Error("请先获取中转模型列表，再选择默认模型和推理强度。");
+            else throw J.Error("请先获取中转模型列表，再选择默认模型。");
             if(!models.Contains(model))throw J.Error("默认模型必须从获取到的模型列表中选择，请重新选择或获取列表。");
         }else if(J.Str(input,"modelSelection")=="catalog")models=Models.Saved(input);
         var p=old==null?new Dictionary<string,object>():new Dictionary<string,object>(old);p["id"]=id==""?Guid.NewGuid().ToString():id;p["name"]=name;p["baseUrl"]=baseUrl;p["siteUrl"]=site;p["adapter"]=adapter;p["protocol"]=protocol;p["model"]=model;p["reasoning"]=reasoning;p["accountUserId"]=J.Str(input,"accountUserId").Trim();p["quotaPerUnit"]=divisor.Value;p["notes"]=J.Str(input,"notes");
@@ -85,6 +86,27 @@ internal sealed class Store {
     public object Reorder(object ids){var input=J.Arr(ids).Select(J.S).ToList();var old=Providers;if(input.Count!=old.Count||input.Distinct().Count()!=input.Count||input.Any(id=>!old.Any(p=>J.Str(p,"id")==id)))throw J.Error("中转列表已变化，请刷新后重试。");Data["providers"]=input.Select(id=>old.First(p=>J.Str(p,"id")==id)).Cast<object>().ToList();Save();return List();}
     static void WriteConfig(string dir,string body){string file=Path.Combine(dir,"config.toml"),tmp=file+"."+Guid.NewGuid().ToString("N")+".tmp";Directory.CreateDirectory(dir);System.IO.File.WriteAllText(tmp,body,new System.Text.UTF8Encoding(false));if(System.IO.File.Exists(file))System.IO.File.Replace(tmp,file,null);else System.IO.File.Move(tmp,file);}
     static readonly string[] RootKeys={"model_provider","model","model_reasoning_effort","model_catalog_json"};
+    internal bool UpgradeManagedModelCatalog() {
+        string file=Path.Combine(ConfigDir,"config.toml");
+        if(!System.IO.File.Exists(file)||ModelCatalog.LinkedPath(file))return false;
+        string original=System.IO.File.ReadAllText(file);var doc=ParseToml(original);
+        var provider=J.Get(J.Get(doc,"model_providers"),J.Str(doc,"model_provider","openai"));
+        if(J.Str(provider,"wire_api","responses")!="responses")return false;
+        // Never relabel an old local bridge as a direct Responses provider at startup.
+        try{ModelProtocol.ValidateAddress(J.Str(provider,"base_url"));}catch{return false;}
+        string oldPath=J.Str(doc,"model_catalog_json");var catalog=ModelCatalog.ReadManaged(Dir,oldPath);
+        if(catalog==null)return false;
+        string nextPath=ModelCatalog.Upgrade(Dir,catalog,"responses");if(nextPath=="")return false;
+        var root=Regex.Match(original,@"(?m)^(?<prefix>[ \t]*model_catalog_json[ \t]*=[ \t]*)(?:""(?:\\.|[^""\\])*""|'[^']*')");
+        if(!root.Success)return false;
+        string next=original.Substring(0,root.Index)+root.Groups["prefix"].Value+J.Encode(nextPath)+original.Substring(root.Index+root.Length);
+        if(J.Str(ParseToml(next),"model_catalog_json")!=nextPath)throw J.Error("无法安全升级模型目录。");
+        string backup=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()+"-"+Guid.NewGuid().ToString("N").Substring(0,8);
+        J.Atomic(Path.Combine(Dir,"backups",backup+".json"),J.Encode(J.Map("id",backup,"at",J.Now(),"name","升级模型目录前配置","existed",true,"configDir",ConfigDir,"contentEncrypted",Secure.Encrypt(original))));
+        if(ModelCatalog.LinkedPath(file)||System.IO.File.ReadAllText(file)!=original)throw J.Error("Codex 配置已被其他程序修改，请重新打开以升级模型目录。");
+        WriteConfig(ConfigDir,next);
+        var history=J.Arr(J.Get(Data,"history"));history.Insert(0,J.Map("id",backup,"at",J.Now(),"name","模型目录升级","action","catalog-upgrade"));Data["history"]=history.Take(100).ToList();Save();CatalogUpgraded=true;return true;
+    }
     static string Patch(string source,object p,string key){
         source=NormalizeToml(source);var doc=ParseToml(source==""?"# Codex configuration\n":source);
         string provider=J.Str(doc,"model_provider");if(provider==""||provider=="openai")provider="custom";
@@ -95,7 +117,7 @@ internal sealed class Store {
         if(J.Str(p,"modelCatalogPath")!="")replacements["model_catalog_json"]=J.Encode(J.Str(p,"modelCatalogPath"));
         string reasoning=J.Str(p,"reasoning");
         if(reasoning!=""&&reasoning!="default")replacements["model_reasoning_effort"]=J.Encode(reasoning);
-        if(reasoning=="default"){
+        if(reasoning==""||reasoning=="default"){
             for(int index=boundary-1;index>=0;index--)if(Regex.IsMatch(lines[index],@"^\s*model_reasoning_effort\s*=")){lines.RemoveAt(index);boundary--;}
         }
         var found=new HashSet<string>();for(int i=0;i<boundary;i++){var m=Regex.Match(lines[i],@"^\s*([\w-]+)\s*=");if(m.Success&&replacements.ContainsKey(m.Groups[1].Value)){string field=m.Groups[1].Value;lines[i]=field+" = "+replacements[field];found.Add(field);}}

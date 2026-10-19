@@ -14,10 +14,18 @@ $arguments+=(Join-Path $PSScriptRoot 'codex-provider-host.cs')
 if($LASTEXITCODE -ne 0){throw 'Codex 中转测试编译失败。'}
 & (Join-Path $output 'CodexProviderTestHost.exe') (Join-Path $output ('fixture-'+[guid]::NewGuid().ToString('N')))
 if($LASTEXITCODE -ne 0){throw 'Codex 配置与协议限制测试失败。'}
+$linkFixture=Join-Path $output ('links-'+[guid]::NewGuid().ToString('N'))
+$linkTarget=Join-Path $linkFixture 'real'
+New-Item -ItemType Directory -Path $linkTarget -Force | Out-Null
+New-Item -ItemType Junction -Path (Join-Path $linkFixture 'linked') -Target $linkTarget | Out-Null
+& (Join-Path $output 'CodexProviderTestHost.exe') $linkFixture '--check-links'
+if($LASTEXITCODE -ne 0){throw '模型目录及配置链接隔离测试失败。'}
 if(-not $SkipCli){
     Push-Location $root
     try{
         & node (Join-Path $PSScriptRoot 'model-catalog-cli.cjs') (Join-Path $output 'CodexProviderTestHost.exe') $CodexPath
         if($LASTEXITCODE -ne 0){throw 'Codex 原生模型列表与当前中转显示名同步测试失败。'}
+        & node (Join-Path $PSScriptRoot 'model-context-cli.cjs') (Join-Path $output 'CodexProviderTestHost.exe') $CodexPath
+        if($LASTEXITCODE -ne 0){throw 'Responses 直连上下文窗口与实际 Token 通知测试失败。'}
     }finally{Pop-Location}
 }

@@ -7,6 +7,7 @@ namespace RelayLite {
 internal static class CodexOnlyChecks {
     static void Check(bool condition,string message){if(!condition)throw J.Error("Codex only: "+message);}
     internal static async Task Run(string root,List<string> checks) {
+        Check(typeof(Store).Assembly.GetType("RelayLite.ModelBridge")==null&&typeof(Store).Assembly.GetType("RelayLite.ClaudeProtocol")==null,"compiled application contains no removed model bridge implementations");
         string directory=Path.Combine(root,"codex-only"),config=Path.Combine(directory,"config");
         Directory.CreateDirectory(config);string file=Path.Combine(config,"config.toml");
         string original="model = \"previous-model\"\n[features]\nkeep = true\n";File.WriteAllText(file,original);

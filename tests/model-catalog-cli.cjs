@@ -47,7 +47,7 @@ async function checkModel(selection){
     assert.equal(model.id,selection.model);assert.equal(model.model,selection.model);assert.equal(model.displayName,selection.model);
     assert.equal(model.isDefault,true);assert.equal(model.hidden,false);
     assert.equal(models.filter(value=>value.isDefault).length,1,'only the configured model is the default');
-    assert.deepEqual(model.supportedReasoningEfforts.map(value=>value.reasoningEffort),selection.effort==='default'?[]:[selection.effort],'the fixed relay effort cannot be switched independently in Codex');
+    for(const entry of models)assert.deepEqual(entry.supportedReasoningEfforts.map(value=>value.reasoningEffort),['low','medium','high','xhigh','max','ultra'],'a configured default leaves all Responses effort choices available');
     if(selection.effort!=='default')assert.equal(model.defaultReasoningEffort,selection.effort);
     fs.writeFileSync(path.join(directory,'result.json'),JSON.stringify({ok:true,...selection,models},null,2));
     console.log(JSON.stringify({ok:true,...selection,displayName:model.displayName,visibleModels:models.length,fixture:directory}));
