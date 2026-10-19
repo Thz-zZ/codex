@@ -26,12 +26,15 @@ internal static class ModelBridgeChecks {
         Check(J.Str(ModelProtocol.Request(Input(true,"claude-fixture"),selectable),"model")=="claude-fixture"&&J.Str(ClaudeProtocol.Request(Input(true,"claude-fixture"),selectable),"model")=="claude-fixture","catalog selection reaches either protocol without being replaced by the default");
         Check(ModelProtocol.SelectedModel(J.Map(),selectable)=="deepseek-fixture","omitted request model falls back to the configured default");
         bool unknown=false;try{ModelProtocol.SelectedModel(Input(true,"gpt-6.1-sol"),selectable);}catch{unknown=true;}Check(unknown,"catalog routes reject models outside the applied list rather than silently rerouting");
-        var staleEffort=J.Obj(Input());staleEffort["reasoning"]=J.Map("effort","ultra");
-        Check(J.Str(ModelProtocol.Request(staleEffort,J.Map("reasoning","low")),"reasoning_effort")=="low","configured effort overrides stale Codex reasoning");
-        Check(!J.Has(ModelProtocol.Request(staleEffort,J.Map("reasoning","default")),"reasoning_effort"),"explicit service default never inherits or sends reasoning effort");
+        var selectedEffort=J.Obj(Input());selectedEffort["reasoning"]=J.Map("effort","medium");
+        Check(J.Str(ModelProtocol.Request(selectedEffort,J.Map("reasoning","low")),"reasoning_effort")=="medium","Codex session effort overrides the relay default");
+        Check(J.Str(ModelProtocol.Request(selectedEffort,J.Map("reasoning","default")),"reasoning_effort")=="medium","unset relay effort follows the Codex session selection");
+        Check(!J.Has(ModelProtocol.Request(Input(),J.Map("reasoning","default")),"reasoning_effort"),"an absent session effort and unset relay default send no effort");
         foreach(string family in new[]{"codex","claude","grok","deepseek","qwen","glm","gemini"})foreach(string effort in new[]{"low","medium","high"}) {
-            var chat=ModelProtocol.Request(staleEffort,J.Map("modelFamily",family,"reasoning",effort));
+            var chat=ModelProtocol.Request(Input(),J.Map("modelFamily",family,"reasoning",effort));
             Check(J.Str(chat,"reasoning_effort")==effort&&!J.Has(chat,"cache_control"),"every compatible relay family uses explicit Chat effort without incompatible Claude cache parameters");
+            selectedEffort["reasoning"]=J.Map("effort",effort);
+            Check(J.Str(ModelProtocol.Request(selectedEffort,J.Map("modelFamily",family,"reasoning","high")),"reasoning_effort")==effort,"all compatible relay families honor Codex session effort");
         }
         var cacheInput=J.Obj(Input());cacheInput["cache_control"]=J.Map("type","ephemeral");cacheInput["prompt_cache_key"]="client-cache-fixture";cacheInput["prompt_cache_retention"]="24h";
         foreach(string protocol in new[]{"chat-completions","anthropic"}){
@@ -40,6 +43,7 @@ internal static class ModelBridgeChecks {
         }
         checks.Add("shared upstream-managed prompt caching policy without vendor cache flags or local response reuse");
         foreach(string effort in new[]{"xhigh","max","ultra","invalid"}) {bool invalid=false;try{ModelProtocol.Request(Input(),J.Map("reasoning",effort));}catch{invalid=true;}Check(invalid,"unsupported Chat effort is rejected before reaching upstream");}
+        selectedEffort["reasoning"]=J.Map("effort","ultra");bool unsupportedEffort=false;try{ModelProtocol.Request(selectedEffort,J.Map("reasoning","low"));}catch{unsupportedEffort=true;}Check(unsupportedEffort,"unsupported session effort cannot silently fall back to the configured default");
         var custom=J.Map("type","custom","name","apply_patch","description","Apply the exact patch");
         var request=J.Obj(Input());request["tools"]=new[]{Tool(),custom};
         var events=new List<object>();var response=new ModelProtocol.Response(request,value=>events.Add(J.Clone(value)));response.Start();

@@ -18,6 +18,14 @@ Push-Location $bridgeRoot
 try{
     & node (Join-Path $PSScriptRoot 'model-catalog-cli.cjs') (Join-Path $bridgeOutput 'ModelBridgeTestHost.exe') $CodexPath
     if($LASTEXITCODE -ne 0){throw 'Codex 原生模型列表与当前中转显示名同步测试失败。'}
+    & node (Join-Path $PSScriptRoot 'model-context-cli.cjs') (Join-Path $bridgeOutput 'ModelBridgeTestHost.exe') $CodexPath
+    if($LASTEXITCODE -ne 0){throw 'Codex 原生上下文窗口与实际 Token 用量通知测试失败。'}
+    foreach($bridgeProtocol in @('chat-completions','anthropic')){
+        foreach($effortDefault in @('default','high')){
+            & node (Join-Path $PSScriptRoot 'model-bridge-cli.cjs') (Join-Path $bridgeOutput 'ModelBridgeTestHost.exe') $CodexPath 'relay-effort-fixture' $bridgeProtocol 'relay-effort-fixture' 'catalog' $effortDefault 'low'
+            if($LASTEXITCODE -ne 0){throw 'Codex 会话强度覆盖可选中转默认值测试失败。'}
+        }
+    }
     foreach($bridgeModel in @('deepseek-fixture','gpt-6.1-sol','grok-fixture','qwen-fixture','glm-fixture','gemini-fixture')){
         & node (Join-Path $PSScriptRoot 'model-bridge-cli.cjs') (Join-Path $bridgeOutput 'ModelBridgeTestHost.exe') $CodexPath $bridgeModel
         if($LASTEXITCODE -ne 0){throw 'Codex CLI 端到端桥接测试失败。'}

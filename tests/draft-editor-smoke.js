@@ -53,8 +53,9 @@
   window.relay={...relayApi,listModels:input=>{modelCalls++;return relayApi.listModels(input);},testConnection:input=>{connectionCalls++;return relayApi.testConnection(input);},inspect:input=>{editorInspects++;return relayApi.inspect(input);}};
   await openEditor();
   check(Array.from($('providerPreset').options).some(option=>option.value==='codex'&&option.textContent==='Codex'),'Codex replaces the ambiguous custom relay label');
-  check(['providerPreset','protocol','modelName','reasoning'].every(id=>$(id).required&&$(id).value===''),'all four required selections start empty');
-  check(['providerPreset','protocol','reasoning'].every(id=>$(id+'Value').textContent.startsWith('请选择')&&$(id+'Picker').classList.contains('is-required-empty')&&$(id+'Picker').querySelector('button').getAttribute('aria-required')==='true'),'empty selectors visibly request an explicit selection from the outset');
+  check(['providerPreset','protocol','modelName'].every(id=>$(id).required&&$(id).value===''),'family, protocol and model required selections start empty');
+  check(!$('reasoning').required&&$('reasoning').value==='default'&&!$('reasoningPicker').classList.contains('is-required-empty')&&$('reasoningPicker').querySelector('button').getAttribute('aria-required')==='false','reasoning starts with optional service default');
+  check(['providerPreset','protocol'].every(id=>$(id+'Value').textContent.startsWith('请选择')&&$(id+'Picker').classList.contains('is-required-empty')&&$(id+'Picker').querySelector('button').getAttribute('aria-required')==='true'),'empty selectors visibly request an explicit selection from the outset');
   check($('modelName').classList.contains('is-required-empty')&&$('modelName').placeholder.includes('选择默认模型'),'default model is visibly empty and required without submitting');
   check($('baseUrl').value===''&&$('adapter').value==='auto','all model families start with a manually configured relay');
   check(Array.from($('providerPreset').options).every(option=>!option.textContent.includes('官方')),'model family choices are not official API presets');
@@ -71,16 +72,17 @@
     check($('protocolHelp').textContent.includes('托盘')&&$('protocolHelp').textContent.includes('中转站'),'relay protocol and bridge lifetime are explained');
     check(document.querySelector('label[for="modelName"] .field-tag.required').textContent==='必选'&&$('modelHelp').textContent.includes('不锁定模型'),'default-only selection and full Codex catalog are explicit in the editor');
   }
-  check($('reasoning').required&&$('reasoning').value==='high'&&$('reasoning').validity.valid,'Claude retains an explicitly selected supported high effort');
+  check(!$('reasoning').required&&$('reasoning').value==='high'&&$('reasoning').validity.valid,'Claude retains an explicitly selected supported high effort');
   check(Array.from($('reasoning').options).every(option=>option.disabled===(!option.value||['xhigh','max','ultra'].includes(option.value))),'Claude permits default and native low/medium/high without inventing mappings');
   check($('reasoningHelp').textContent.includes('output_config.effort')&&!$('protocolHelp').textContent.includes('缓存'),'native effort remains explained without a protocol-specific cache promise');
+  check($('reasoningHelp').textContent.includes('仍可在 Codex 内切换')&&!$('reasoningHelp').textContent.includes('优先于 Codex'),'configured effort is described as a default, not a lock on Codex selection');
   $('reasoning').value='xhigh';updateProtocolForm();
-  check($('reasoning').value===''&&!$('reasoning').validity.valid,'an unsupported strength requires a new explicit choice');
+  check($('reasoning').value==='default'&&$('reasoning').validity.valid,'switching to a protocol with an unsupported strength restores service default');
   const claudeEffortTrigger=$('reasoningPicker').querySelector('button');claudeEffortTrigger.click();
-  $('reasoningMenu').querySelector('[data-index="1"]').click();check($('reasoning').value==='default','Claude service default can be explicitly selected');
+  $('reasoningMenu').querySelector('[data-index="0"]').click();check($('reasoning').value==='default','Claude service default can be explicitly selected');
   claudeEffortTrigger.click();$('reasoningMenu').querySelector('[data-index="5"]').click();check($('reasoning').value==='default','disabled reasoning options cannot be selected with the mouse');
   claudeEffortTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));claudeEffortTrigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));check($('reasoning').value==='high','keyboard reaches native high and skips unsupported reasoning options');
-  claudeEffortTrigger.click();$('reasoningMenu').querySelector('[data-index="1"]').click();
+  claudeEffortTrigger.click();$('reasoningMenu').querySelector('[data-index="0"]').click();
   for(const family of ['codex','claude','grok','deepseek','qwen','glm','gemini']){
     const preview=document.createElement('div');preview.innerHTML=modelUsageSummary({modelFamily:family,protocol:family==='claude'?'anthropic':family==='codex'?'responses':'chat-completions',model:'fixture-'+family,reasoning:'high'});
     check(preview.textContent.includes('模型参数')&&preview.textContent.includes('high')&&!preview.textContent.includes('缓存')&&!preview.querySelector('input'),'per-model notices contain parameters, not vendor cache policies or switches');
@@ -91,18 +93,20 @@
   check(diagnostic.textContent.includes('实际发送 actual-<model> · 强度 medium')&&!diagnostic.textContent.includes('缓存')&&!diagnostic.querySelector('model'),'sent settings remain escaped without the removed per-request cache display');
   diagnosticProvider.bridgeUsage.cache={};diagnostic.innerHTML=modelUsageSummary(diagnosticProvider);
   check(!diagnostic.querySelector('.model-usage-counts'),'missing or present counters do not restore the removed per-model cache panel');
+  diagnosticProvider.reasoning='default';diagnosticProvider.bridgeUsage.reasoning='';diagnostic.innerHTML=modelUsageSummary(diagnosticProvider);
+  check(diagnostic.textContent.includes('跟随 Codex')&&diagnostic.textContent.includes('实际发送 actual-<model> · 强度 未发送强度'),'unset relay default is distinct from actual requests without effort');
   modelPicker.open(false);check(!modelPicker.options.some(option=>option.id===''),'Claude bridge cannot inherit a Codex model');modelPicker.close();
   $('providerPreset').value='codex';$('providerPreset').dispatchEvent(new Event('change',{bubbles:true}));
   check($('baseUrl').value==='https://fixture-shared.example/v1'&&$('protocol').value==='anthropic'&&$('adapter').value==='sub2api'&&$('modelName').required&&$('reasoning').value==='default','switching back to Codex retains the manually chosen protocol and other explicit selections');
   $('protocol').value='chat-completions';$('protocol').dispatchEvent(new Event('change',{bubbles:true}));
   $('providerPreset').value='claude';$('providerPreset').dispatchEvent(new Event('change',{bubbles:true}));
   check($('protocol').value==='chat-completions','a Claude relay may expose a manually selected OpenAI-compatible protocol');
-  closeEditor();await openEditor();check(['providerPreset','protocol','modelName','reasoning'].every(id=>$(id).required&&$(id).value===''),'every fresh entry requires four selections without automatic defaults');
+  closeEditor();await openEditor();check(['providerPreset','protocol','modelName'].every(id=>$(id).required&&$(id).value==='')&&$('reasoning').value==='default'&&!$('reasoning').required,'every fresh entry restores optional service default while requiring the other three selections');
   $('providerName').value='未保存识别测试';$('baseUrl').value='https://fixture-draft.example/v1';$('baseUrl').dispatchEvent(new Event('input',{bubbles:true}));$('apiKey').value='sk-draft-smoke-fake-only';
   check($('providerName').placeholder==='请输入中转名称'&&$('apiKey').required&&$('apiKeyRequirement').textContent==='必填','neutral name and clear required fields');
-  for(const selections of [{modelFamily:''},{protocol:''},{model:''},{reasoning:''}]){
+  for(const selections of [{modelFamily:''},{protocol:''},{model:''}]){
     const rejected=await window.relay.saveProvider({name:'invalid-selection-fixture',baseUrl:'https://fixture-selection.example/v1',key:'fixture-selection-key',modelFamily:'codex',protocol:'responses',model:'fixture-model',reasoning:'default',...selections});
-    check(!rejected.ok&&(await call('state')).providers.length===count,'save API cannot bypass any of the four mandatory selections');
+    check(!rejected.ok&&(await call('state')).providers.length===count,'save API cannot bypass any of the three mandatory selections');
   }
   check(modelCalls===0,'model list is fetched only on click');
   await modelPicker.load();check(modelCalls===0&&$('modelStatus').textContent.includes('选择模型调用协议'),'model discovery cannot fall back to Responses while protocol is empty');
@@ -114,7 +118,8 @@
   check($('modelName').value==='','fetching does not choose default silently');
   $('modelName').value='mini';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));
   check(modelPicker.options.length===1,'model list searchable');$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='gpt-codex-mini','dropdown chooses model');
-  $('providerForm').requestSubmit();check($('providerDialog').open&&state.providers.length===count&&$('formError').textContent.includes('推理强度')&&$('reasoningPicker').querySelector('button').getAttribute('aria-invalid')==='true','saving with only a model requires explicit reasoning and focuses the visible selector');
+  const defaultSaveApi=window.relay;let defaultSaveInput;
+  try{window.relay={...defaultSaveApi,saveProvider:async input=>{defaultSaveInput=input;return {ok:false,error:'default-effort-save-fixture'};}};$('providerForm').requestSubmit();await waitFor(()=>!$('saveProvider').disabled,'optional service default submits');check(defaultSaveInput?.reasoning==='default'&&$('formError').textContent==='default-effort-save-fixture','saving submits service default without requiring a reasoning choice');}finally{window.relay=defaultSaveApi;}
   $('modelName').value='custom-model';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));$('modelName').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));let unlisted=false;try{modelPicker.validate();}catch{unlisted=true;}check(unlisted,'unlisted text cannot be used as the default model');
   modelPicker.open(false);check(!modelPicker.options.some(option=>option.id===''),'Responses cannot inherit a Codex model');$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='gpt-codex','first actual model selected');
   modelPicker.open(false);$('modelMenu').querySelector('[data-model-index="1"]').click();check($('modelName').value==='gpt-codex-mini','model selected again');
@@ -177,7 +182,7 @@
   check(modelPicker.loaded&&modelCalls===fetchedBeforeEdit,'cosmetic family changes preserve valid discovery without automatic HTTP');
   $('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save model family with custom relay settings');
   await openEditor(saved.id);check($('providerPreset').value==='grok'&&$('protocol').value==='responses'&&$('apiKey').value===relayBefore.key,'reopening a third-party relay restores its model family instead of guessing from an official hostname');
-  filterPickers.get('reasoning').open();$('reasoningMenu').querySelector('[data-index="1"]').click();$('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save explicit service default');
+  filterPickers.get('reasoning').open();$('reasoningMenu').querySelector('[data-index="0"]').click();$('providerForm').requestSubmit();await waitFor(()=>!$('providerDialog').open,'save explicit service default');
   await openEditor(saved.id);check($('reasoning').value==='default'&&$('modelName').value==='gpt-codex-mini','explicit service default survives saving and reopening without discarding the chosen model');closeEditor();
   setState(await call('deleteProvider',{id:saved.id}));
   check(state.providers.length===count,'test draft cleaned up');

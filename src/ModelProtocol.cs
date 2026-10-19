@@ -23,6 +23,11 @@ internal static class ModelProtocol {
         return protocol;
     }
     internal static bool Bridged(object value){return Protocol(value)!="responses";}
+    internal static string SelectedReasoning(object request,object route) {
+        string selected=J.Str(J.Get(request,"reasoning"),"effort").Trim();
+        if(selected=="")selected=J.Str(route,"reasoning").Trim();
+        return selected=="default"?"":selected;
+    }
     internal static string SelectedModel(object request,object route) {
         string configured=J.Str(route,"model").Trim();
         if(J.Str(route,"modelSelection")=="catalog"){
@@ -133,7 +138,7 @@ internal static class ModelProtocol {
         var format=J.Get(J.Get(request,"text"),"format");
         if(J.Str(format,"type")=="json_schema")result["response_format"]=J.Map("type","json_schema","json_schema",J.Map("name",J.Str(format,"name","response"),"schema",J.Get(format,"schema"),"strict",J.Get(format,"strict",false)));
         else if(J.Str(format,"type")=="json_object")result["response_format"]=J.Map("type","json_object");
-        string effort=J.Str(route,"reasoning");
+        string effort=SelectedReasoning(request,route);
         if(effort!=""&&effort!="default") {
             if(!new[]{"low","medium","high"}.Contains(effort))throw J.Error("桥接不支持该推理强度；请选择 low、medium、high 或“服务默认”，不会自动降级。");
             result["reasoning_effort"]=effort;

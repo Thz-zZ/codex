@@ -23,6 +23,7 @@ button:not(:disabled):hover{filter:none}
 .sidebar-heading .import-current{color:#8292a7;border:0;outline:none;box-shadow:none;background:transparent}
 .sidebar-heading .import-current:hover,.sidebar-heading .import-current:focus-visible{color:var(--accent-deep);background:transparent}
 .sidebar-add{margin:0 7px 18px;flex-shrink:0;min-height:39px;padding:0 12px;font-size:12px}
+#addProvider:focus{outline:none}
 .sidebar .provider-list{display:flex;flex-direction:column;gap:6px;min-height:0;overflow:auto;padding:3px 3px 8px;scrollbar-width:thin;scrollbar-color:#cdd6e2 transparent;flex:1;overscroll-behavior:contain}
 .provider-card{padding:12px 5px;gap:3px;border:1px solid transparent;border-radius:11px;background:transparent;box-shadow:none;flex-shrink:0;min-width:0;transition:background .16s,border-color .16s,box-shadow .16s}
 .provider-card:hover{background:#e7edf5}

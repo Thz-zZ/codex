@@ -31,6 +31,10 @@ internal sealed class ModelBridge:IDisposable {
         if(key!=token)return false;
         lock(sync)return routes.Values.Any(route=>J.Str(route,"providerId")==id&&Address(J.Str(route,"path"))==baseUrl.TrimEnd('/'));
     }
+    internal string AppliedProtocol(string baseUrl,string key) {
+        if(key!=token)return "responses";
+        lock(sync){var route=routes.Values.FirstOrDefault(value=>Address(J.Str(value,"path"))==baseUrl.TrimEnd('/'));return route==null?"responses":ModelProtocol.Protocol(route);}
+    }
     string Address(string path){return "http://127.0.0.1:"+port+path;}
     internal void Restore(object config) {
         string url=J.Str(config,"baseUrl");
@@ -188,7 +192,7 @@ internal sealed class ModelBridge:IDisposable {
                             }else push(J.Decode(await ReadBounded(upstream.Content,deadline.Token).ConfigureAwait(false)),true);
                             if(claude)claudeResponse.Finish();
                             var result=response.Finish();
-                            lock(sync)if(routes.ContainsKey(J.Str(route,"path")))latestUsage[J.Str(route,"providerId")]=J.Map("at",J.Now(),"model",J.Str(converted,"model"),"reasoning",J.Str(route,"reasoning"),"protocol",protocol,"status",J.Str(result,"status"),"cache",response.CacheUsage);
+                            lock(sync)if(routes.ContainsKey(J.Str(route,"path")))latestUsage[J.Str(route,"providerId")]=J.Map("at",J.Now(),"model",J.Str(converted,"model"),"reasoning",claude?J.Str(J.Get(converted,"output_config"),"effort"):J.Str(converted,"reasoning_effort"),"protocol",protocol,"status",J.Str(result,"status"),"cache",response.CacheUsage);
                             if(streaming)EndChunks(stream);else await Json(stream,200,result).ConfigureAwait(false);
                         }
                     }

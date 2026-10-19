@@ -24,9 +24,11 @@ internal static class ClaudeProtocolChecks {
         var defaultEffort=ClaudeProtocol.Request(Input(),J.Map("reasoning","default"));Check(!J.Has(defaultEffort,"reasoning_effort")&&!J.Has(defaultEffort,"thinking"),"explicit Claude service default sends no unsupported thinking parameters");
         Check(!J.Has(defaultEffort,"output_config")&&!J.Has(defaultEffort,"cache_control"),"service default does not inject effort or vendor-specific cache parameters");
         foreach(string effort in new[]{"low","medium","high"}) {
-            var stale=Input();stale["reasoning"]=J.Map("effort","ultra");stale["text"]=J.Map("format",J.Map("type","json_schema","schema",J.Map("type","object")));
-            var native=ClaudeProtocol.Request(stale,J.Map("reasoning",effort));var config=J.Get(native,"output_config");
-            Check(J.Str(config,"effort")==effort&&J.Str(J.Get(config,"format"),"type")=="json_schema","Claude effort uses the applied route and coexists with structured output");
+            var selected=Input();selected["reasoning"]=J.Map("effort",effort);selected["text"]=J.Map("format",J.Map("type","json_schema","schema",J.Map("type","object")));
+            var native=ClaudeProtocol.Request(selected,J.Map("reasoning","high"));var config=J.Get(native,"output_config");
+            Check(J.Str(config,"effort")==effort&&J.Str(J.Get(config,"format"),"type")=="json_schema","Claude uses the Codex session effort instead of pinning the route default and preserves structured output");
+            Check(J.Str(J.Get(ClaudeProtocol.Request(selected,J.Map("reasoning","default")),"output_config"),"effort")==effort,"unset Claude relay effort follows the Codex session");
+            Check(J.Str(J.Get(ClaudeProtocol.Request(Input(),J.Map("reasoning",effort)),"output_config"),"effort")==effort,"Claude uses the configured default when the session sends no effort");
             Check(!J.Has(native,"reasoning_effort")&&!J.Has(native,"thinking")&&!J.Has(native,"cache_control"),"native effort remains independent of upstream-managed caching");
         }
         foreach(string effort in new[]{"xhigh","max","ultra","invalid"}) {bool invalid=false;try{ClaudeProtocol.Request(Input(),J.Map("reasoning",effort));}catch{invalid=true;}Check(invalid,"unsupported native effort cannot be silently omitted or downgraded");}

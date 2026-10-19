@@ -14,6 +14,8 @@ const {once}=require('node:events');
   const clientModel=process.argv[6]||model;
   const imageTool=process.argv[7]==='image';
   const catalog=process.argv[7]==='catalog';
+  const configuredEffort=process.argv[8]||'high',clientEffort=process.argv[9];
+  const expectedEffort=clientEffort||(configuredEffort==='default'?'medium':configuredEffort);
   const directory=path.resolve('build/model-bridge/cli-fixture-'+Date.now());
   const workspace=path.join(directory,'workspace');fs.mkdirSync(workspace,{recursive:true});
   const imagePath=path.join(workspace,'fixture.png');
@@ -27,8 +29,8 @@ const {once}=require('node:events');
       let body='';for await(const chunk of request)body+=chunk;
       const payload=JSON.parse(body);requests.push(payload);assert.equal(payload.model,catalog?clientModel:model,catalog?'Codex can switch to a non-default catalog model':'the legacy applied relay model wins over the Codex session model');
       assert.equal(payload.cache_control,undefined,'all bridged protocols rely on upstream caching without injected vendor flags');
-      if(claude){assert.equal(payload.output_config?.effort,'high','native Claude high effort reaches upstream');assert.equal(payload.reasoning_effort,undefined);}
-      else assert.equal(payload.reasoning_effort,'high','compatible model high effort reaches upstream');
+      if(claude){assert.equal(payload.output_config?.effort,expectedEffort,'native Claude receives the Codex selection or the configured default');assert.equal(payload.reasoning_effort,undefined);}
+      else assert.equal(payload.reasoning_effort,expectedEffort,'compatible model receives the Codex selection or the configured default');
       if(claude)for(const message of payload.messages.filter(message=>message.role==='assistant')){
         const calls=message.content.filter(block=>block.type==='tool_use');
         if(calls.length){
@@ -83,10 +85,10 @@ const {once}=require('node:events');
   });
   try{
     server.listen(0,'127.0.0.1');await once(server,'listening');
-    host=spawn(hostPath,[directory,'http://127.0.0.1:'+server.address().port+'/v1',model,protocol,...(catalog?['high',JSON.stringify([model,clientModel])]:[])],{windowsHide:true,stdio:['pipe','pipe','pipe']});
+    host=spawn(hostPath,[directory,'http://127.0.0.1:'+server.address().port+'/v1',model,protocol,configuredEffort,...(catalog?[JSON.stringify([...new Set([model,clientModel])])]:[])],{windowsHide:true,stdio:['pipe','pipe','pipe']});
     host.stderr.on('data',data=>hostError+=data);
     await new Promise((resolve,reject)=>{host.once('error',reject);host.once('exit',code=>reject(Error('Bridge fixture exited '+code+': '+hostError)));host.stdout.once('data',()=>resolve());});
-    cli=spawn(codexPath,['exec','--strict-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--json','-C',workspace,'-m',clientModel,'-c','approval_policy="never"','Read the current goal with get_goal, then report completion.'],{windowsHide:true,env:{...process.env,CODEX_HOME:path.join(directory,'config')},stdio:['ignore','pipe','pipe']});
+    cli=spawn(codexPath,['exec','--strict-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--json','-C',workspace,'-m',clientModel,'-c','approval_policy="never"',...(clientEffort?['-c','model_reasoning_effort='+JSON.stringify(clientEffort)]:[]),'Read the current goal with get_goal, then report completion.'],{windowsHide:true,env:{...process.env,CODEX_HOME:path.join(directory,'config')},stdio:['ignore','pipe','pipe']});
     cli.stdout.on('data',data=>stdout+=data);cli.stderr.on('data',data=>stderr+=data);
     const timeout=setTimeout(()=>{cli.kill();},40000);
     const [code]=await once(cli,'exit');clearTimeout(timeout);
@@ -96,10 +98,10 @@ const {once}=require('node:events');
     assert.equal(requests.length,customExercised?3:2,'Codex completes all advertised tool round trips');
     assert.ok(stdout.includes('bridge-cli-fixture complete'),'Codex displays the bridged assistant response');
     if(claude)assert.ok(!stdout.includes('private native fixture')&&!stdout.includes('native-signature-')&&!stdout.includes('native-redacted-'),'native thinking is not exposed as assistant text');
-    console.log(JSON.stringify({ok:true,model,clientModel,protocol,imageTool,catalog,customExercised,requests:requests.length,fixture:directory}));
+    console.log(JSON.stringify({ok:true,model,clientModel,protocol,configuredEffort,clientEffort,expectedEffort,imageTool,catalog,customExercised,requests:requests.length,fixture:directory}));
   }finally{
     if(cli&&cli.exitCode===null)cli.kill();
-    if(host){host.stdin.end('\n');await once(host,'exit').catch(()=>{});}
+    if(host&&host.exitCode===null){host.stdin.end('\n');await once(host,'exit').catch(()=>{});}
     server.close();server.closeAllConnections();
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});

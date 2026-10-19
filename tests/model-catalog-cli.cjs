@@ -47,7 +47,8 @@ async function checkModel(selection){
     assert.equal(model.id,selection.model);assert.equal(model.model,selection.model);assert.equal(model.displayName,selection.model);
     assert.equal(model.isDefault,true);assert.equal(model.hidden,false);
     assert.equal(models.filter(value=>value.isDefault).length,1,'only the configured model is the default');
-    assert.deepEqual(model.supportedReasoningEfforts.map(value=>value.reasoningEffort),selection.effort==='default'?[]:[selection.effort],'the fixed relay effort cannot be switched independently in Codex');
+    const efforts=selection.protocol==='responses'?['low','medium','high','xhigh','max','ultra']:['low','medium','high'];
+    for(const entry of models)assert.deepEqual(entry.supportedReasoningEfforts.map(value=>value.reasoningEffort),efforts,'the configured default does not remove other Codex effort choices');
     if(selection.effort!=='default')assert.equal(model.defaultReasoningEffort,selection.effort);
     fs.writeFileSync(path.join(directory,'result.json'),JSON.stringify({ok:true,...selection,models},null,2));
     console.log(JSON.stringify({ok:true,...selection,displayName:model.displayName,visibleModels:models.length,fixture:directory}));
@@ -63,6 +64,8 @@ async function checkModel(selection){
     {model:'claude-opus-5-5',protocol:'anthropic',effort:'high'},
     {model:'deepseek-fixture',protocol:'chat-completions',effort:'medium'},
     {model:'gpt-6.1-sol',protocol:'responses',effort:'xhigh'},
+    {model:'gpt-6.1-sol',protocol:'responses',effort:'default'},
+    {model:'gpt-6.1-sol',protocol:'responses',effort:'high'},
     ...['responses','chat-completions','anthropic'].map(protocol=>({model:'relay-default',protocol,effort:'default',models:['claude-fixture','deepseek-fixture','relay-default']}))
   ])await checkModel(selection);
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -62,7 +62,7 @@ internal static class ClaudeProtocol {
         }
         if(messages.Count==0)throw J.Error("Claude Messages 需要用户消息。");
         var result=J.Map("model",J.Str(chat,"model"),"messages",messages,"stream",J.Get(chat,"stream",false),"max_tokens",J.Get(chat,"max_tokens",8192));
-        string effort=J.Str(route,"reasoning");
+        string effort=J.Str(chat,"reasoning_effort");
         if(effort!=""&&effort!="default") {
             if(!new[]{"low","medium","high"}.Contains(effort))throw J.Error("Claude Messages 不支持该推理强度；请选择 low、medium、high 或“服务默认”，不会自动降级。");
             result["output_config"]=J.Map("effort",effort);
