@@ -6,8 +6,8 @@ import sys
 
 root = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser()
-parser.add_argument('--output', type=Path, default=root.parent/'build')
-parser.add_argument('--work', type=Path, default=root.parent/'build'/'session-build')
+parser.add_argument('--output', type=Path, default=root.parent/'build'/'current')
+parser.add_argument('--work', type=Path, default=root.parent/'build'/'current'/'session-build')
 args = parser.parse_args()
 args.work.mkdir(parents=True, exist_ok=True)
 subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--onefile', '--console',

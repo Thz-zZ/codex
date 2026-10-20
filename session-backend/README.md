@@ -4,6 +4,6 @@
 
 `service.py` 为 Relay Lite 提供私有标准输入/输出 JSON 通道，不开放端口。界面已整合到 Relay Lite，不依赖 Qt，也不需要用户安装 Python。
 
-开发环境使用 Python 3.12+ x64，安装 `requirements-dev.txt` 后运行 `build.py` 生成 `build/SessionBackend.exe`。使用 `python -m pytest tests -q` 验证隔离测试；测试不会修改真实会话。
+开发环境使用 Python 3.12+ x64，安装 `requirements-dev.txt` 后运行 `build.py` 生成 `build/current/SessionBackend.exe`，重复构建复用同一目录。使用 `python -m pytest tests -q` 验证隔离测试；测试不会修改真实会话。
 
 删除与导入沿用原项目的 Codex 客户端占用检查；不会自动关闭其他程序。删除前展示完整范围并要求确认。导入不覆盖已有会话。版本校验、包哈希、路径检查和数据库事务保留在原模块中。

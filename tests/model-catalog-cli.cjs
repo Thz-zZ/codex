@@ -11,7 +11,7 @@ const codexPath=process.argv[3]||'codex';
 async function checkModel(selection){
   const directory=path.resolve('build/model-catalog/fixture-'+Date.now()+'-'+selection.effort);
   fs.mkdirSync(directory,{recursive:true});
-  const host=spawn(hostPath,[directory,'http://127.0.0.1:1/v1',selection.model,selection.protocol,selection.effort,...(selection.models?[JSON.stringify(selection.models)]:[])],{windowsHide:true,stdio:['pipe','pipe','pipe']});
+  const host=spawn(hostPath,[directory,'http://127.0.0.1:1/v1',selection.model,selection.protocol,selection.effort,...(selection.models||selection.contextPreset?[JSON.stringify(selection.models||[selection.model]),selection.contextPreset||'default']:[])],{windowsHide:true,stdio:['pipe','pipe','pipe']});
   const hostExit=once(host,'exit');let hostError='',server;
   host.stderr.on('data',chunk=>hostError+=chunk);
   try{
@@ -44,7 +44,7 @@ async function checkModel(selection){
     assert.equal(models.length,selection.models?.length||1,'Codex lists the complete applied catalog');
     assert.deepEqual(models.map(value=>value.model).sort(),[...(selection.models||[selection.model])].sort());
     const model=models.find(value=>value.model===selection.model);
-    assert.equal(model.id,selection.model);assert.equal(model.model,selection.model);assert.equal(model.displayName,selection.model);
+    assert.equal(model.id,selection.model);assert.equal(model.model,selection.model);assert.equal(model.displayName,selection.contextPreset==='sol-500k'?'6.1 Sol · 500k':selection.model);
     assert.equal(model.isDefault,true);assert.equal(model.hidden,false);
     assert.equal(models.filter(value=>value.isDefault).length,1,'only the configured model is the default');
     for(const entry of models)assert.deepEqual(entry.supportedReasoningEfforts.map(value=>value.reasoningEffort),['low','medium','high','xhigh','max','ultra'],'a configured default leaves all Responses effort choices available');
@@ -63,6 +63,7 @@ async function checkModel(selection){
     {model:'gpt-codex-fixture',protocol:'responses',effort:'high'},
     {model:'gpt-codex-mini-fixture',protocol:'responses',effort:'medium'},
     {model:'gpt-6.1-sol',protocol:'responses',effort:'xhigh'},
+    {model:'gpt-6.1-sol',protocol:'responses',effort:'high',contextPreset:'sol-500k',models:['gpt-6.1-sol','gpt-5.6-sol']},
     {model:'relay-default',protocol:'responses',effort:'default',models:['gpt-codex-fixture','gpt-codex-mini-fixture','relay-default']}
   ])await checkModel(selection);
 })().catch(error=>{console.error(error);process.exitCode=1;});

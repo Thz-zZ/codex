@@ -92,6 +92,18 @@
   $('providerForm').requestSubmit();check($('formError').textContent.includes('默认模型')&&document.activeElement===$('modelName'),'missing default model focuses the remaining visible required field');
   await modelPicker.load();check(modelCalls===1&&modelPicker.models.length===3,'models fetched with draft credentials');
   check($('modelName').value==='','fetching does not choose default silently');
+  const savedModels=[...modelPicker.models],solPresetApi=window.relay;let savedSolPreset;
+  modelPicker.models=[...savedModels,'gpt-6.1-sol'];modelPicker.open(false);
+  check(modelPicker.options.length===5&&modelPicker.options.filter(option=>option.label==='6.1 Sol · 500k').length===1&&modelPicker.options.some(option=>option.id==='gpt-6.1-sol'),'only Sol receives a separate 500k option and its ordinary option remains selectable');
+  window.relay={...solPresetApi,saveProvider:async input=>{savedSolPreset=input;return {ok:false,error:'sol-preset-fixture'};}};
+  modelPicker.choose('6.1 Sol · 500k');$('providerForm').requestSubmit();
+  await waitFor(()=>savedSolPreset&&!$('saveProvider').disabled,'Sol preset reaches the save API');
+  check(savedSolPreset.model==='gpt-6.1-sol'&&savedSolPreset.contextPreset==='sol-500k','saving a displayed Sol preset sends the actual upstream model ID and an explicit context choice');
+  modelPicker.restore({modelSelection:'catalog',models:modelPicker.models,model:'gpt-6.1-sol',contextPreset:'sol-500k'});
+  check($('modelName').value==='6.1 Sol · 500k','editing restores the saved Sol preset label');
+  modelPicker.choose('gpt-6.1-sol');
+  check(modelPicker.selection().contextPreset==='default'&&modelPicker.selection().model==='gpt-6.1-sol','choosing the ordinary Sol option explicitly resets the context preset');
+  modelPicker.models=savedModels;modelPicker.input.value='';modelPicker.close();$('formError').textContent='';window.relay=solPresetApi;
   $('modelName').value='mini';$('modelName').dispatchEvent(new Event('input',{bubbles:true}));
   check(modelPicker.options.length===1,'model list searchable');$('modelMenu').querySelector('[data-model-index="0"]').click();check($('modelName').value==='gpt-codex-mini','dropdown chooses model');
   const optionalApi=window.relay;let optionalSaved;

@@ -9,7 +9,7 @@ const {once}=require('node:events');
 const hostPath=path.resolve(process.argv[2]||'build/codex-provider-tests/CodexProviderTestHost.exe');
 const codexPath=process.argv[3]||'codex';
 
-async function check(effort,requestEffort,withUsage=true,contextOverride){
+async function check(effort,requestEffort,withUsage=true,contextOverride,contextPreset='default',model='relay-context-fixture'){
   const protocol='responses';
   const directory=path.resolve('build/model-context/'+protocol+'-'+effort+'-'+Date.now());
   const workspace=path.join(directory,'workspace');fs.mkdirSync(workspace,{recursive:true});
@@ -18,6 +18,7 @@ async function check(effort,requestEffort,withUsage=true,contextOverride){
     try{
       let body='';for await(const chunk of request)body+=chunk;
       const input=JSON.parse(body),expectedEffort=requestEffort||(effort==='default'?undefined:effort);requests++;fs.writeFileSync(path.join(directory,'upstream-request.json'),JSON.stringify(input,null,2));
+      assert.equal(input.model,model,'a display preset never changes the upstream model ID');
       response.writeHead(200,{'Content-Type':'text/event-stream'});
       {
         assert.equal(input.reasoning?.effort,expectedEffort);
@@ -32,7 +33,7 @@ async function check(effort,requestEffort,withUsage=true,contextOverride){
   });
   try{
     upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
-    host=spawn(hostPath,[directory,'http://127.0.0.1:'+upstream.address().port+'/v1','relay-context-fixture',protocol,effort],{windowsHide:true,stdio:['pipe','pipe','pipe']});hostExit=once(host,'exit');
+    host=spawn(hostPath,[directory,'http://127.0.0.1:'+upstream.address().port+'/v1',model,protocol,effort,JSON.stringify([model,'other-model']),contextPreset],{windowsHide:true,stdio:['pipe','pipe','pipe']});hostExit=once(host,'exit');
     let hostError='';host.stderr.on('data',chunk=>hostError+=chunk);
     await Promise.race([once(host.stdout,'data'),hostExit.then(([code])=>{throw Error('Fixture failed '+code+': '+hostError);})]);
     if(contextOverride){const file=path.join(directory,'config/config.toml');fs.writeFileSync(file,'model_context_window = '+contextOverride+'\n'+fs.readFileSync(file,'utf8'));}
@@ -47,7 +48,7 @@ async function check(effort,requestEffort,withUsage=true,contextOverride){
         while((newline=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,newline);buffer=buffer.slice(newline+1);
           try{
             const message=JSON.parse(line);if(message.error)throw Error(JSON.stringify(message.error));
-            if(message.id===1){send({method:'initialized'});send({id:2,method:'thread/start',params:{cwd:workspace,model:'relay-context-fixture',approvalPolicy:'never',sandbox:'read-only',ephemeral:true}});}
+            if(message.id===1){send({method:'initialized'});send({id:2,method:'thread/start',params:{cwd:workspace,model,approvalPolicy:'never',sandbox:'read-only',ephemeral:true}});}
             if(message.id===2){assert.equal(requests,0,'an empty thread makes no generation request');assert.ok(!usage||usage.last.totalTokens===0,'empty threads have no invented positive usage');send({id:3,method:'turn/start',params:{threadId:message.result.thread.id,input:[{type:'text',text:'Return a short fixture response.'}],...(requestEffort?{effort:requestEffort}:{})}});}
             if(message.method){notifications.push(message);if(message.method==='thread/tokenUsage/updated')usage=message.params.tokenUsage;}
             if(message.method==='turn/completed'){
@@ -64,14 +65,18 @@ async function check(effort,requestEffort,withUsage=true,contextOverride){
     if(fixtureError)throw fixtureError;
     assert.ok(requests>0,'native Codex completed a real fixture request');
     if(withUsage){
-      assert.equal(usage?.modelContextWindow,(contextOverride||272000)*0.95,'context notification respects the client budget and explicit overrides');
+      assert.equal(usage?.modelContextWindow,(contextOverride||(contextPreset==='sol-500k'?500000:272000))*(contextPreset==='sol-500k'?1:0.95),'context notification respects the selected preset and explicit overrides');
       assert.equal(usage.last.totalTokens,60,'context indicator uses real upstream usage, not a fabricated counter');
     }else assert.ok(!usage||usage.last.totalTokens===0,'missing upstream usage is not replaced with an invented positive count');
-    console.log(JSON.stringify({ok:true,protocol,effort,requestEffort,withUsage,contextOverride,contextWindow:usage?.modelContextWindow,usedTokens:usage?.last.totalTokens,fixture:directory}));
+    console.log(JSON.stringify({ok:true,protocol,effort,requestEffort,withUsage,contextOverride,contextPreset,model,contextWindow:usage?.modelContextWindow,usedTokens:usage?.last.totalTokens,fixture:directory}));
   }finally{
     if(app&&app.exitCode===null)app.kill();
     if(host&&host.exitCode===null){host.stdin.end('\n');await hostExit;}
     upstream.close();upstream.closeAllConnections();
   }
 }
-(async()=>{await check('default');await check('high');await check('high','low');await check('default',undefined,true,200000);await check('default',undefined,false);})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{
+  await check('default');await check('high');await check('high','low');await check('default',undefined,true,200000);await check('default',undefined,false);
+  await check('high',undefined,true,undefined,'sol-500k','gpt-6.1-sol');
+  await check('default',undefined,true,undefined,'default','gpt-6.1-sol');
+})().catch(error=>{console.error(error);process.exitCode=1;});

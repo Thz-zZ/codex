@@ -54,6 +54,7 @@ internal sealed class Store {
     public object Upsert(object input,bool requireSelections=false,bool requireDiscovery=false){
         var id=J.Str(input,"id");var old=id==""?null:Find(id);string name=J.Str(input,"name").Trim();if(name.Length<1||name.Length>80)throw J.Error("名称需为 1–80 个字符。");
         string protocol=ModelProtocol.Protocol(input),model=J.Str(input,"model").Trim(),reasoning=J.Str(input,"reasoning").Trim();
+        bool solContext=ModelCatalog.UsesSolContext(input);
         if(reasoning=="")reasoning="default";
         if(requireSelections){
             if(model=="")throw J.Error("请获取模型列表并选择默认模型。");
@@ -77,7 +78,8 @@ internal sealed class Store {
         }else if(J.Str(input,"modelSelection")=="catalog")models=Models.Saved(input);
         var p=old==null?new Dictionary<string,object>():new Dictionary<string,object>(old);p["id"]=id==""?Guid.NewGuid().ToString():id;p["name"]=name;p["baseUrl"]=baseUrl;p["siteUrl"]=site;p["adapter"]=adapter;p["protocol"]=protocol;p["model"]=model;p["reasoning"]=reasoning;p["accountUserId"]=J.Str(input,"accountUserId").Trim();p["quotaPerUnit"]=divisor.Value;p["notes"]=J.Str(input,"notes");
         if(models!=null){p["models"]=models;p["modelSelection"]="catalog";}else {p.Remove("models");p.Remove("modelSelection");}
-        p["modelFamily"]="codex";p.Remove("bridgeUsage");
+        p["modelFamily"]="codex";p.Remove("bridgeUsage");p.Remove("modelMetadata");
+        if(solContext)p["contextPreset"]=ModelCatalog.SolContextPreset;else p.Remove("contextPreset");
         if(key!="")p["keyEncrypted"]=Secure.Encrypt(key);if(J.True(J.Get(input,"clearAccount")))p["accountEncrypted"]="";else if(account!="")p["accountEncrypted"]=Secure.Encrypt(account);
         if(old==null||J.Str(old,"siteUrl")!=site||J.Str(old,"adapter")!=adapter||key!=""&&key!=Key(old)){p.Remove("detectedAdapter");p.Remove("detectedAt");}
         p["updatedAt"]=J.Now();p["revision"]=Guid.NewGuid().ToString();var list=J.Arr(J.Get(Data,"providers"));if(old==null)list.Add(p);else list[list.IndexOf(old)]=p;Data["providers"]=list;Save();return Pub(p);

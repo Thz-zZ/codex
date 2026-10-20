@@ -14,6 +14,7 @@ internal static class CodexProviderTestHost {
                 var store=new Store(directory,config,new Secure());
                 var input=J.Map("name","fixture provider","baseUrl",args[1],"protocol",args.Length>3?args[3]:"responses","adapter","none","model",args.Length>2?args[2]:"gpt-codex-fixture","reasoning",args.Length>4?args[4]:"high","key","fake-codex-cli-secret");
                 if(args.Length>5){input["modelSelection"]="catalog";input["models"]=J.Decode(args[5]);}
+                if(args.Length>6)input["contextPreset"]=args[6];
                 input["modelFamily"]="codex";
                 var provider=store.Upsert(input,true);
                 store.Switch(J.Str(provider,"id"));Console.WriteLine(J.Encode(store.ConfigInfo()));Console.Out.Flush();Console.ReadLine();

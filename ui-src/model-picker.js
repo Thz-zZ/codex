@@ -26,14 +26,16 @@ class RelayModelPicker {
   reset(message='填写地址和密钥后获取全部模型，并选择默认模型。') {
     this.epoch++;this.models=[];this.loaded=false;this.discoveryToken='';this.button.disabled=false;this.button.textContent='↻ 获取模型';this.status.textContent=message;this.status.classList.remove('error');this.close();
   }
-  restore(provider){if(provider?.modelSelection==='catalog'&&provider.models?.length){this.models=[...provider.models];this.loaded=true;this.status.textContent='已保存 '+this.models.length+' 个模型，默认项可更改；列表有变化时请重新获取。';}}
-  validate(){if(!this.loaded||this.button.disabled)throw Error('请先获取完整模型列表，再选择默认模型。');if(!this.models.includes(this.input.value.trim()))throw Error('默认模型必须从获取到的模型列表中选择。');}
+  restore(provider){if(provider?.modelSelection==='catalog'&&provider.models?.length){this.models=[...provider.models];this.loaded=true;if(provider.contextPreset==='sol-500k'&&provider.model?.toLowerCase()==='gpt-6.1-sol')this.input.value='6.1 Sol · 500k';this.status.textContent='已保存 '+this.models.length+' 个模型，默认项可更改；列表有变化时请重新获取。';}}
+  selection(){const sol=this.models.find(id=>id.toLowerCase()==='gpt-6.1-sol');return sol&&this.input.value.trim()==='6.1 Sol · 500k'?{model:sol,contextPreset:'sol-500k'}:{model:this.input.value.trim(),contextPreset:'default'};}
+  validate(){if(!this.loaded||this.button.disabled)throw Error('请先获取完整模型列表，再选择默认模型。');if(!this.models.includes(this.selection().model))throw Error('默认模型必须从获取到的模型列表中选择。');}
   close(){this.menu.classList.add('hidden');this.input.setAttribute('aria-expanded','false');this.input.removeAttribute('aria-activedescendant');}
   open(filter=false){
     document.dispatchEvent(new CustomEvent('relay-dropdown-open',{detail:'modelName'}));
     const query=filter?this.input.value.trim().toLowerCase():'';
-    const matches=this.models.filter(id=>id.toLowerCase().includes(query));
-    this.options=matches.slice(0,200).map(id=>({id,label:id}));
+    const choices=this.models.flatMap(id=>[{id,label:id},...(id.toLowerCase()==='gpt-6.1-sol'?[{id:'6.1 Sol · 500k',label:'6.1 Sol · 500k'}]:[])]);
+    const matches=choices.filter(option=>option.label.toLowerCase().includes(query));
+    this.options=matches.slice(0,200);
     this.menu.replaceChildren();
     for(const [index,option] of this.options.entries()){
       const button=document.createElement('button');button.type='button';button.tabIndex=-1;button.role='option';button.id='model-option-'+index;button.dataset.modelIndex=String(index);

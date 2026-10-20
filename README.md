@@ -6,19 +6,21 @@
 
 在 Windows PowerShell 中运行 `build-dev.ps1`。脚本使用 .NET Framework C# 编译器、WebView2 .NET SDK、Nett 和 Roslyn。默认从项目目录的上一级寻找 `native-toolchain/`；也可通过 `CODEX_RELAY_TOOLCHAIN` 指向依赖目录。WebView2 Runtime 需要安装在 Windows 上。
 
+构建产物固定保存在 `build/current/`，以后持续复用这一目录，不再为不同版本、日期或验证新建一套构建。源码、编译参数及依赖没有变化时，应用和更新器直接复用已有 EXE；会话服务也只在源码更新或 EXE 缺失时重新构建。
+
 `CodexRelayLite.csproj` 可通过 MSBuild 属性 `RelayToolchainRoot` 指定同一依赖目录。
 
 会话服务构建需要 Python 3.12+ x64，在独立虚拟环境安装 `session-backend/requirements-dev.txt`。通过 `CODEX_SESSION_PYTHON` 指定 Python 路径；`build-dev.ps1` 会自动调用 `build-sessions.ps1` 生成会话服务。发布后无需 Python 或 Qt。
 
 ## 版本与应用打包
 
-当前版本为 **v1.2.8**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
+当前版本为 **v1.2.9**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
 
-运行 `build-release.ps1` 生成可直接运行的 Windows x64 应用文件夹。可通过 `-OutputDirectory` 指定新输出目录。发布包包含应用与会话服务 EXE、DLL、界面、许可、会话管理说明及版本记录。
+运行 `build-release.ps1` 生成可直接运行的 Windows x64 应用文件夹。程序固定放在 `release/current/`，ZIP 和 `update.json` 固定放在 `release/assets/`，本地只保留当前一套。重复打包会替换这两个目录中的上一份产物，旧目录送入回收站，不累积版本文件夹或旧 ZIP。发布包包含应用与会话服务 EXE、DLL、界面、许可、会话管理说明及版本记录。
 
 自动更新发布步骤见 [UPDATE-GUIDE.md](UPDATE-GUIDE.md)。程序默认从 `Thz-zZ/codex` 的 GitHub 正式版检查更新；发布脚本同时生成完整 ZIP 和 `update.json`。
 
-本机程序正在运行时，可用 `build-dev.ps1 -OutputDirectory build/update-dev` 在独立目录编译；对应打包命令为 `build-release.ps1 -BuildDirectory build/update-dev`。新目录也需要先构建或复制未变更的 `SessionBackend.exe`。
+程序占用输出文件时，先退出该目录中的程序再构建，继续复用固定目录。`-OutputDirectory`、`-BuildDirectory` 仅用于明确要求的自定义导出，不用于累积历史版本；覆盖已有发布目录前会校验发布标记、源码与构建路径隔离，以及目录链接。桌面导出仅在用户要求时执行。
 
 ## 内容
 
@@ -36,9 +38,13 @@
 
 填写支持 Codex Responses 的中转 API 基础地址、调用密钥和中转名称，点击“获取模型”读取密钥可见的完整列表。**默认模型须从列表中明确选择，不会自动代选；默认推理强度可选**，不指定时跟随 Codex，指定后仅设置默认项，不锁定其他强度。不能把列表外的名称作为默认项。模型 ID 由中转返回，不硬编码官方名称，以兼容自定义别名；请确认所选模型支持 Codex Responses。应用只把配置写入 Codex，不在本地代理、转换或拦截生成请求；退出本应用不影响已配置的 Codex 直连调用。
 
-地址、API 密钥变更后必须重新获取模型。编辑现有 Codex 记录可复用已保存列表，变更默认模型无需重新查询。应用中转会写入 `model_catalog_json` 完整模型目录，显示名与模型 ID 一致，默认项优先排列；界面搜索一次最多显示 200 项，但保存及同步不截断列表。应用后需重启 Codex 或开启 CLI 新会话，旧会话不会被强制重置模型。指定的默认强度写入 Codex 配置；选择“跟随 Codex”会清除遗留的 `model_reasoning_effort`，不会写入无效的 `default` 值。Responses 目录保留 `low / medium / high / xhigh / max / ultra` 六档；选项不代表已验证上游支持，请按中转和模型实际能力选择。
+地址、API 密钥变更后必须重新获取模型。编辑现有 Codex 记录可复用已保存列表，变更默认模型无需重新查询。应用中转会写入 `model_catalog_json` 完整模型目录，普通项显示名与模型 ID 一致，默认项优先排列；界面搜索一次最多显示 200 项，但保存及同步不截断列表。应用后需重启 Codex 或开启 CLI 新会话，旧会话不会被强制重置模型。指定的默认强度写入 Codex 配置；选择“跟随 Codex”会清除遗留的 `model_reasoning_effort`，不会写入无效的 `default` 值。Responses 目录保留 `low / medium / high / xhigh / max / ultra` 六档；选项不代表已验证上游支持，请按中转和模型实际能力选择。
 
 模型目录采用 schema v2，使用独立内容哈希快照，不包含地址或密钥，不修改 Codex 安装文件或内置缓存。上下文元数据使用客户端兼容预算 **272000 Token / 95%**，不是对上游模型容量的承诺；旧目录已有的独立预算及 `model_context_window` 配置覆盖会保留。上下文用量来自原生真实 Token 通知，空会话或未报告用量时不伪造占用。
+
+获取模型仅保存模型 ID，不自动读取或套用接口中的上下文容量。列表包含 `gpt-6.1-sol` 时，Relay 模型下拉框会在普通项旁增加 **“6.1 Sol · 500k”** 可选预设；其他模型不增加此项。普通项保持原预算，只有主动选择该预设并保存、应用时，才给这个中转的 6.1 Sol 设置 **500000 Token / 100%**，Codex 有效窗口为 500k，其余模型不变。预设随中转保存，编辑时会恢复；确认中转支持较大窗口后再选用。
+
+预设仍使用原始请求模型 ID `gpt-6.1-sol`，不会向中转发送带 `500k` 后缀的虚构 ID，也不增加本地代理。普通与 500k 预设在 Relay 中选择；Codex 按已应用的预设显示同一个模型，500k 模式显示为 **“6.1 Sol · 500k”**。已有列表可直接编辑选择，无需为此重新获取；保存、应用后重启 Codex 或开启 CLI 新会话。选择普通项并重新应用即可恢复原预算。已有 `model_context_window` 手动覆盖仍优先。
 
 启动时安全升级当前 Responses 直连配置引用的本应用旧模型目录：保存加密配置备份，仅替换目录引用，保留模型、默认强度、上下文覆盖、注释和未应用的中转编辑。旧快照不覆盖；外部目录、哈希不匹配或损坏的目录、链接路径、旧桥接和非 Responses 配置不自动升级。升级后需重启 Codex 加载目录，配置备份可恢复原始目录引用。
 
@@ -76,10 +82,10 @@
 
 运行 `tests/test-window-placement.ps1 -ToolchainRoot <依赖目录>` 验证窗口状态读取、屏幕边界校验，以及独立进程之间的普通窗口、最大化、最小化和静默启动恢复。测试仅使用 build 内的独立偏好文件，不接触实际用户的窗口设置。
 
-运行 `tests/test-codex-provider.ps1 -ToolchainRoot <依赖目录>` 验证 Codex / Responses 限制、默认模型与推理强度、完整模型列表、密钥隔离、旧数据保留与显式迁移、配置应用和导入，并验证旧模型目录升级、加密备份恢复与外部文件隔离。通过本机 Codex CLI 验证完整模型目录、六档强度和显示名，以及 Responses 模拟接口上的真实 Token 通知（272000 × 95% = 258400）、请求强度覆盖默认项、独立预算覆盖、空会话和未返回用量。可通过 `-CodexPath` 指定 CLI，或用 `-SkipCli` 只运行原生回归。测试使用 build 内的独立配置与合成密钥，不访问真实模型服务或修改用户的 Codex 配置；实际服务可用性需用户自己的 API 密钥验证。
+运行 `tests/test-codex-provider.ps1 -ToolchainRoot <依赖目录>` 验证 Codex / Responses 限制、默认模型与推理强度、完整模型列表、密钥隔离、旧数据保留与显式迁移、配置应用和导入，并验证旧模型目录升级、加密备份恢复与外部文件隔离。通过本机 Codex CLI 验证完整模型目录、六档强度和显示名，以及 Responses 模拟接口上的真实 Token 通知（272000 × 95% = 258400）、请求强度覆盖默认项、独立预算覆盖、空会话和未返回用量；另验证 Sol 500k 预设的精确显示名、500000 有效窗口、原始上游模型 ID、其他模型预算隔离，以及切回普通项。可通过 `-CodexPath` 指定 CLI，或用 `-SkipCli` 只运行原生回归。测试使用 build 内的独立配置与合成密钥，不访问真实模型服务或修改用户的 Codex 配置；实际服务可用性需用户自己的 API 密钥验证。
 
 运行 `node --test tests/detail-cache.test.cjs` 验证缓存淘汰、容量计算及大量查询下的数据保留上限。
 
-使用会话虚拟环境运行 `python tests/measure-memory.py "build/Codex Relay Lite.exe"`，可执行隔离桌面 smoke 并采样主程序及全部子进程的工作集和私有内存，结果写入对应构建目录的 `smoke-data/process-memory.json`。工作集合计可能包含共享页，不能直接当作唯一物理内存用量。
+使用会话虚拟环境运行 `python tests/measure-memory.py "build/current/Codex Relay Lite.exe"`，可执行隔离桌面 smoke 并采样主程序及全部子进程的工作集和私有内存，结果写入对应构建目录的 `smoke-data/process-memory.json`。工作集合计可能包含共享页，不能直接当作唯一物理内存用量。
 
-使用会话虚拟环境运行 `python -m pytest session-backend/tests -q`。桌面测试先运行 `python tests/seed-session-fixture.py` 创建 build 内的合成会话，再执行 `build/Codex Relay Lite.exe --smoke-test`；运行 `node tests/generate-fixtures.cjs` 后，可通过 `--self-test` 验证原有中转逻辑；独立构建目录可作为夹具输出参数，例如 `node tests/generate-fixtures.cjs build/merge-v1.2.8-20261019/usage-fixtures.json`。期望值来自独立旧版参考快照，生成时仅平移日期，无需其他项目目录。测试不操作真实用户会话。
+使用会话虚拟环境运行 `python -m pytest session-backend/tests -q`。桌面测试先运行 `python tests/seed-session-fixture.py` 创建 `build/current/smoke-data/` 内的合成会话，再执行 `build/current/Codex Relay Lite.exe --smoke-test`；运行 `node tests/generate-fixtures.cjs` 后，可通过 `build/current/Codex Relay Lite.exe --self-test` 验证原有中转逻辑。夹具默认写入同一当前构建目录，验证后清理临时产物。期望值来自独立旧版参考快照，生成时仅平移日期，无需其他项目目录。测试不操作真实用户会话。

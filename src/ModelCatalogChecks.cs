@@ -65,7 +65,28 @@ internal static class ModelCatalogChecks {
         }
         checks.Add("complete multi-model catalogs and default priority without truncating the saved list");
         checks.Add("selected model display catalog, selectable effort with optional default, credential isolation, immutable snapshots and exact user-catalog restore");
+        SolContextChecks(root,checks);
         UpgradeChecks(root,checks);
+    }
+    static void SolContextChecks(string root,List<string> checks) {
+        string directory=Path.Combine(root,"sol-context"),config=Path.Combine(directory,"config");Directory.CreateDirectory(config);
+        var input=J.Map("name","Sol 500k","baseUrl","https://sol.example/v1","key","fixture-sol-key","model",ModelCatalog.SolModel,"contextPreset",ModelCatalog.SolContextPreset,"modelSelection","catalog","models",new[]{ModelCatalog.SolModel,"gpt-5.6-sol"},"modelMetadata",J.Map(ModelCatalog.SolModel,J.Map("context_window",1000000)));
+        var store=new Store(directory,config,new Secure());string id=J.Str(store.Upsert(input,true),"id");
+        store=new Store(directory,config,new Secure());Check(J.Str(store.Details(id),"contextPreset")==ModelCatalog.SolContextPreset&&!J.Has(store.Details(id),"modelMetadata"),"explicit Sol context choice survives restart and old fetched metadata is removed");
+        store.Switch(id);
+        var document=Nett.Toml.ReadString(File.ReadAllText(Path.Combine(config,"config.toml"))).ToDictionary();var entries=J.Arr(J.Get(J.Read(J.Str(document,"model_catalog_json"),null),"models"));
+        Check(J.Str(document,"model")==ModelCatalog.SolModel&&!J.Has(document,"model_context_window"),"Sol 500k keeps the real upstream model ID and does not set a global context override");
+        Check(entries.Count==2&&J.Str(entries[0],"slug")==ModelCatalog.SolModel&&J.Str(entries[0],"display_name")==ModelCatalog.SolContextLabel&&J.Num(entries[0],"context_window")==500000&&J.Num(entries[0],"effective_context_window_percent")==100,"explicit Sol choice produces a named 500k usable-context preset");
+        Check(J.Num(entries[1],"context_window")==272000&&J.Num(entries[1],"effective_context_window_percent")==95,"the Sol preset leaves every other model's budget unchanged");
+        input["id"]=id;input["contextPreset"]="default";store.Upsert(input,true);store.Switch(id);
+        document=Nett.Toml.ReadString(File.ReadAllText(Path.Combine(config,"config.toml"))).ToDictionary();entries=J.Arr(J.Get(J.Read(J.Str(document,"model_catalog_json"),null),"models"));
+        Check(!J.Has(store.Details(id),"contextPreset")&&J.Str(entries[0],"display_name")==ModelCatalog.SolModel&&J.Num(entries[0],"context_window")==272000&&J.Num(entries[0],"effective_context_window_percent")==95,"choosing the normal model restores its original context budget");
+        string before=File.ReadAllText(store.File);
+        foreach(var invalid in new[]{J.Map("model","gpt-5.6-sol","contextPreset",ModelCatalog.SolContextPreset),J.Map("model",ModelCatalog.SolModel,"contextPreset","unknown")}){
+            var changed=J.Obj(J.Clone(input));foreach(var pair in invalid)changed[pair.Key]=pair.Value;
+            bool rejected=false;try{store.Upsert(changed,true);}catch{rejected=true;}Check(rejected&&File.ReadAllText(store.File)==before,"unsupported models and invented context presets cannot change saved settings");
+        }
+        checks.Add("opt-in Sol 500k preset, exact label, original upstream ID, independent model budgets, persistence and ordinary-choice restore");
     }
     static void UpgradeChecks(string root,List<string> checks) {
         string directory=Path.Combine(root,"catalog-upgrade"),config=Path.Combine(directory,"config");Directory.CreateDirectory(config);

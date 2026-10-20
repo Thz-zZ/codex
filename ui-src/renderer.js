@@ -152,11 +152,12 @@ function modelUsageSummary(provider){
   if(!provider)return '';
   if(requiresCodexSetup(provider))return '<section class="notice error model-usage"><strong>旧中转需重新配置</strong><div>本应用现在仅支持 Codex Responses 直连。原记录和密钥仍保留；请编辑并确认上游支持 Responses，重新获取模型列表后保存、应用。</div></section>';
   const effort=!provider.reasoning||provider.reasoning==='default'?'跟随 Codex（未指定默认强度）':provider.reasoning;
-  return `<section class="notice model-usage"><strong>模型参数</strong><div>已保存${provider.modelSelection==='catalog'?'默认模型':''}：${esc(provider.model||'未指定模型')} · 强度 ${esc(effort)}（修改后需应用）</div>${provider.modelSelection==='catalog'?`<div>已保存 ${fmt(provider.models?.length||0)} 个模型，应用后可在 Codex 内直接切换；此处所选仅作默认。</div>`:'<div>Responses 直连按 Codex 实际请求调用；修改配置后旧会话需重新选择或新建。</div>'}</section>`;
+  const model=provider.contextPreset==='sol-500k'&&provider.model?.toLowerCase()==='gpt-6.1-sol'?'6.1 Sol · 500k':provider.model||'未指定模型';
+  return `<section class="notice model-usage"><strong>模型参数</strong><div>已保存${provider.modelSelection==='catalog'?'默认模型':''}：${esc(model)} · 强度 ${esc(effort)}（修改后需应用）</div>${provider.modelSelection==='catalog'?`<div>已保存 ${fmt(provider.models?.length||0)} 个模型，应用后可在 Codex 内直接切换；此处所选仅作默认。</div>`:'<div>Responses 直连按 Codex 实际请求调用；修改配置后旧会话需重新选择或新建。</div>'}</section>`;
 }
 function updateModelForm(){
   $('modelName').required=true;
-  $('modelHelp').textContent='先获取中转的完整模型列表，再从列表中明确选择一个支持 Codex Responses 的默认模型（不会自动选择）。应用时同步全部模型，重启 Codex 后可在其中直接切换；这里所选仅作默认，不锁定模型。';
+  $('modelHelp').textContent='先获取完整模型列表，再选择支持 Codex Responses 的默认模型（不会自动选择，不锁定模型）。6.1 Sol 另提供“6.1 Sol · 500k”可选预设，确认中转支持后再选；普通项保持默认预算。应用后需重启 Codex。';
   $('modelName').placeholder='请先获取模型，再选择默认模型';syncModelRequirement();
   for(const option of $('reasoning').options)option.disabled=!option.value;
   if(!$('reasoning').value)$('reasoning').value='default';
@@ -288,7 +289,7 @@ async function importCurrent(){try{const draft=await call('importCurrent');await
 $('importCurrent').onclick=importCurrent;
 $('providerForm').addEventListener('submit',async e=>{
   e.preventDefault();$('formError').textContent='';$('saveProvider').disabled=true;
-  const input={id:$('providerId').value||undefined,name:$('providerName').value,baseUrl:$('baseUrl').value,modelFamily:'codex',protocol:'responses',adapter:$('adapter').value,key:$('apiKey').value,model:$('modelName').value,reasoning:$('reasoning').value,discoveryToken:modelPicker.discoveryToken,accountKey:$('accountKey').value,accountUserId:$('accountUserId').value,quotaPerUnit:$('quotaPerUnit').value,siteUrl:siteFollowsBase?'':$('siteUrl').value,notes:$('notes').value,clearAccount:$('clearAccount').checked};
+  const input={id:$('providerId').value||undefined,name:$('providerName').value,baseUrl:$('baseUrl').value,modelFamily:'codex',protocol:'responses',adapter:$('adapter').value,key:$('apiKey').value,...modelPicker.selection(),reasoning:$('reasoning').value,discoveryToken:modelPicker.discoveryToken,accountKey:$('accountKey').value,accountUserId:$('accountUserId').value,quotaPerUnit:$('quotaPerUnit').value,siteUrl:siteFollowsBase?'':$('siteUrl').value,notes:$('notes').value,clearAccount:$('clearAccount').checked};
   try{modelPicker.validate();setState(await call('saveProvider',input));closeEditor();toast('中转已保存。点击“应用”同步默认项和全部模型到 Codex。');}catch(error){$('formError').textContent=error.message;}finally{$('saveProvider').disabled=false;}
 });
 $('providerDialog').addEventListener('cancel',e=>{e.preventDefault();closeEditor();});

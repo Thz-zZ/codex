@@ -9,7 +9,7 @@ internal static class ModelsChecks {
     internal static async Task Run(string root,List<string> checks){
         var input=J.Map("baseUrl","https://models.example/proxy/v1/","key","Bearer fixture-model-secret","siteUrl","https://stats.example","accountKey","unused-account");
         try{
-            Usage.FetchOverride=(url,key,user)=>{Check(url=="https://models.example/proxy/v1/models"&&key=="fixture-model-secret"&&user=="","only model API receives API credentials");return Task.FromResult<object>(J.Map("data",new object[]{J.Map("id","gpt-fixture-mini"),J.Map("id","gpt-fixture"),J.Map("id","gpt-fixture-mini"),J.Map("object","invalid"),J.Map("id","bad\nmodel")}));};
+            Usage.FetchOverride=(url,key,user)=>{Check(url=="https://models.example/proxy/v1/models"&&key=="fixture-model-secret"&&user=="","only model API receives API credentials");return Task.FromResult<object>(J.Map("data",new object[]{J.Map("id","gpt-fixture-mini","context_window",1000000),J.Map("id","gpt-fixture"),J.Map("id","gpt-fixture-mini"),J.Map("object","invalid"),J.Map("id","bad\nmodel")}));};
             var result=await Models.List(input);var models=J.Arr(J.Get(result,"models")).Select(J.S).ToList();Check(models.SequenceEqual(new[]{"gpt-fixture","gpt-fixture-mini"}),"model IDs normalized, filtered and deduplicated");
             string config=Path.Combine(root,"models-config"),dir=Path.Combine(root,"models-store");Directory.CreateDirectory(config);File.WriteAllText(Path.Combine(config,"config.toml"),"model = \"original-model\"\n");
             var store=new Store(dir,config,new Secure());var provider=store.Upsert(J.Map("name","models fixture","baseUrl","https://models.example/v1","key","fixture-model-key","model",models[1]));string id=J.Str(provider,"id");
@@ -17,6 +17,7 @@ internal static class ModelsChecks {
             var catalogInput=J.Map("name","all model fixture","baseUrl",J.Str(input,"baseUrl"),"key",J.Str(input,"key"),"modelFamily","codex","protocol","responses","model",models[1],"reasoning","default","discoveryToken",J.Str(result,"discoveryToken"));
             var allProvider=store.Upsert(catalogInput,true,true);string allId=J.Str(allProvider,"id");
             Check(J.Str(allProvider,"modelSelection")=="catalog"&&J.Arr(J.Get(allProvider,"models")).Select(J.S).SequenceEqual(models),"backend saves the full verified discovery list");
+            Check(!J.Has(allProvider,"modelMetadata")&&!J.Has(result,"contextConfiguredCount")&&J.Arr(J.Get(ModelCatalog.Create(allProvider),"models")).All(entry=>J.Num(entry,"context_window")==272000),"model discovery saves IDs only and never automatically imports upstream context settings");
             catalogInput["id"]=allId;catalogInput.Remove("discoveryToken");catalogInput["key"]="";catalogInput["model"]=models[0];
             store=new Store(dir,config,new Secure());store.Upsert(catalogInput,true,true);store.Switch(allId);
             Check(J.Str(store.ConfigInfo(),"model")==models[0]&&J.Arr(J.Get(store.Details(allId),"models")).Count==2,"saved discovery survives restart and changing only the default requires no HTTP request");

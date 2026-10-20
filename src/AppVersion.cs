@@ -9,7 +9,7 @@ using System.Reflection;
 
 namespace RelayLite {
 internal static class AppVersion {
-    public const string Number="1.2.8";
+    public const string Number="1.2.9";
     public const string FileVersion=Number+".0";
 }
 }

@@ -10,11 +10,13 @@
 
 1. 修改 `src/AppVersion.cs` 中的 `Number`，例如 `1.1.6`，并更新版本记录和 README。
 2. 在 Windows PowerShell 中执行 `./build-release.ps1`。工具链配置与 README 中的构建说明相同。
-3. 脚本生成程序目录 `release/Codex Relay Lite v1.1.6/`，以及附件目录 `release/Codex Relay Lite v1.1.6-assets/`。
+3. 脚本复用 `build/current/`，生成固定程序目录 `release/current/`，以及固定附件目录 `release/assets/`。每次替换上一份本地产物，不再按版本创建新目录；源码和依赖未变化时复用已有编译结果。
 4. 在 GitHub 创建正式 Release，标签为 `v1.1.6`，填写更新说明，上传附件目录中的 `CodexRelayLite-1.1.6-windows-x64.zip` 和 `update.json`。
 5. 发布后，旧版在自动检查或点击“检查更新”时会发现新版。建议发布前先在隔离目录验证更新包。
 
 不要在生成 `update.json` 后修改 ZIP。清单中的下载文件名、版本、字节数和 SHA-256 必须与上传附件一致。ZIP 是完整的 Windows x64 程序包，不能使用 GitHub 自动生成的源码压缩包代替。
+
+本地只保留一套当前发布包，ZIP 文件名继续包含版本号以兼容 GitHub 更新下载地址，但 `release/assets/` 中会移除上次的 ZIP。替换时上一份生成目录送入回收站；目录必须为空或包含对应发布标记，不能覆盖源码、构建目录或包含链接的路径。程序占用输出目录时先退出程序，不另外创建一份版本目录。
 
 `update.json` 的格式如下，实际值由发布脚本生成：
 

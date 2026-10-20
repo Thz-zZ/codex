@@ -9,6 +9,14 @@ internal static class ModelCatalog {
     internal const int SchemaVersion=2;
     // Codex-compatible client budgeting defaults, not a claim about an upstream model's capacity.
     internal const int DefaultContextWindow=272000,DefaultContextPercent=95;
+    internal const string SolModel="gpt-6.1-sol",SolContextPreset="sol-500k",SolContextLabel="6.1 Sol · 500k";
+    internal const int SolContextWindow=500000;
+    internal static bool UsesSolContext(object provider) {
+        string preset=J.Str(provider,"contextPreset");
+        if(preset==""||preset=="default")return false;
+        if(preset!=SolContextPreset||!string.Equals(J.Str(provider,"model").Trim(),SolModel,StringComparison.OrdinalIgnoreCase))throw J.Error("500k 上下文预设仅支持 6.1 Sol，请重新选择默认模型。");
+        return true;
+    }
     static object ReasoningLevels(){return new[]{"low","medium","high","xhigh","max","ultra"}.Select(level=>J.Map("effort",level,"description","在 Codex 中选择 "+level+"；需中转和模型支持。")).ToArray();}
     internal static object Create(object provider) {
         ModelProtocol.Protocol(provider);
@@ -17,11 +25,12 @@ internal static class ModelCatalog {
         bool specified=effort!=""&&effort!="default";
         if(specified&&!new[]{"low","medium","high","xhigh","max","ultra"}.Contains(effort))throw J.Error("模型目录包含不支持的推理强度。");
         bool catalog=J.Str(provider,"modelSelection")=="catalog";
+        bool solContext=UsesSolContext(provider);
         var reasoningLevels=ReasoningLevels();
         var models=catalog?Models.Saved(provider).OrderBy(id=>id==model?0:1).ThenBy(id=>id,StringComparer.Ordinal).ToList():new System.Collections.Generic.List<string>{model};
-        var entries=models.Select((id,index)=>J.Map("slug",id,"display_name",id,"description",catalog?"中转提供的模型；可在 Codex 中切换模型和推理强度，Codex Relay 中的设置仅作默认。":"当前已应用的中转模型；可在 Codex 中调整推理强度，切换模型请在 Codex Relay 中操作。",
+        var entries=models.Select((id,index)=>J.Map("slug",id,"display_name",solContext&&id==model?SolContextLabel:id,"description",solContext&&id==model?"用户选择的 6.1 Sol 500k 上下文预设；实际容量需中转支持。可在 Codex Relay 中选择普通模型项恢复默认预算。":catalog?"中转提供的模型；可在 Codex 中切换模型和推理强度，Codex Relay 中的设置仅作默认。":"当前已应用的中转模型；可在 Codex 中调整推理强度，切换模型请在 Codex Relay 中操作。",
             "default_reasoning_level",specified?(object)effort:null,"supported_reasoning_levels",reasoningLevels,
-            "context_window",DefaultContextWindow,"effective_context_window_percent",DefaultContextPercent,
+            "context_window",solContext&&id==model?SolContextWindow:DefaultContextWindow,"effective_context_window_percent",solContext&&id==model?100:DefaultContextPercent,
             "shell_type","shell_command","visibility","list","supported_in_api",true,"priority",index,"support_verbosity",false,
             "truncation_policy",J.Map("mode","tokens","limit",10000),"experimental_supported_tools",new object[0],
             "base_instructions","You are a coding agent working with the user on their computer. Follow the conversation instructions and applicable AGENTS.md files. Inspect the workspace, make focused changes, preserve unrelated user work, use the available tools to verify results, and report accurately.",

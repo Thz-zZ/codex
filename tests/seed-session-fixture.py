@@ -10,7 +10,7 @@ from conftest import add_session
 from session_manager.rpc import CodexRpc, discover_codex
 from session_manager.store import inventory
 
-home = (Path(sys.argv[1]) if len(sys.argv) > 1 else root/'build/smoke-data/session-fixture').resolve()
+home = (Path(sys.argv[1]) if len(sys.argv) > 1 else root/'build/current/smoke-data/session-fixture').resolve()
 assert home.name == 'session-fixture' and home.parent.name == 'smoke-data'
 home.mkdir(parents=True, exist_ok=True)
 rpc = CodexRpc(discover_codex(), home)

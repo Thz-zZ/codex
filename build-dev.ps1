@@ -1,11 +1,25 @@
 param([string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $relayRoot=$PSScriptRoot
+function Invoke-RelayCompiler([string]$Executable,[string]$Response,[string[]]$Arguments,[string[]]$Inputs) {
+    $lines=$Arguments | ForEach-Object {'"'+($_ -replace '"','\"')+'"'}
+    $content=($lines -join [Environment]::NewLine)+[Environment]::NewLine
+    $changed=-not [IO.File]::Exists($Response) -or [IO.File]::ReadAllText($Response) -ne $content
+    $required=$changed -or -not [IO.File]::Exists($Executable)
+    if(-not $required){
+        $built=(Get-Item -LiteralPath $Executable).LastWriteTimeUtc
+        $required=@($Inputs | Where-Object {-not [IO.File]::Exists($_) -or (Get-Item -LiteralPath $_).LastWriteTimeUtc -gt $built}).Count -gt 0
+    }
+    if(-not $required){Write-Output ('Reusing unchanged build: '+$Executable);return}
+    if($changed){[IO.File]::WriteAllText($Response,$content,[Text.UTF8Encoding]::new($true))}
+    & (Join-Path $relayDependencies 'roslyn/tasks/net472/csc.exe') ('@'+$Response)
+    if($LASTEXITCODE -ne 0){throw ('编译失败：'+$Executable)}
+}
 $relayVersionMatch=[regex]::Match([IO.File]::ReadAllText((Join-Path $relayRoot 'src/AppVersion.cs')),'const string Number="(\d+\.\d+\.\d+)"')
 if(-not $relayVersionMatch.Success){throw '无法读取应用版本号。'}
 $relayVersion=$relayVersionMatch.Groups[1].Value
 $relayDependencies=if($env:CODEX_RELAY_TOOLCHAIN){(Resolve-Path $env:CODEX_RELAY_TOOLCHAIN).Path}else{Join-Path (Split-Path $relayRoot) 'native-toolchain'}
-$relayBuild=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{Join-Path $relayRoot 'build'}
+$relayBuild=if($OutputDirectory){[IO.Path]::GetFullPath($OutputDirectory)}else{Join-Path $relayRoot 'build/current'}
 $relayUI=Join-Path $relayBuild 'ui'
 $relayBackend=Join-Path $relayBuild 'SessionBackend.exe'
 $relayBackendSources=Get-ChildItem -LiteralPath (Join-Path $relayRoot 'session-backend') -Filter '*.py' -Recurse | Where-Object {$_.FullName -notmatch '[\\/]tests[\\/]'}
@@ -27,17 +41,16 @@ $relayHtml=[regex]::Replace($relayHtml,'(<span data-app-version>)[^<]*(</span>)'
 $relayReferences=@('System.dll','System.Core.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Web.Extensions.dll','System.Net.Http.dll','System.Web.dll','System.Security.dll','System.IO.Compression.dll','System.IO.Compression.FileSystem.dll','Microsoft.CSharp.dll',(Join-Path $relayBuild 'Microsoft.Web.WebView2.Core.dll'),(Join-Path $relayBuild 'Microsoft.Web.WebView2.WinForms.dll'),(Join-Path $relayBuild 'Nett.dll'))
 $relayArguments=@('/nologo','/target:winexe','/platform:x64','/optimize+',('/out:'+(Join-Path $relayBuild 'Codex Relay Lite.exe')),('/win32manifest:'+(Join-Path $relayRoot 'lite.manifest')),('/win32icon:'+(Join-Path $relayUI 'icon.ico')))
 foreach($relayReference in $relayReferences){$relayArguments+=('/reference:'+$relayReference)}
-$relayArguments+=(Get-ChildItem -LiteralPath (Join-Path $relayRoot 'src') -Filter '*.cs').FullName
+$relaySources=(Get-ChildItem -LiteralPath (Join-Path $relayRoot 'src') -Filter '*.cs').FullName
+$relayArguments+=$relaySources
 $relayResponse=Join-Path $relayBuild 'dev.rsp'
-$relayResponseLines=$relayArguments | ForEach-Object { '"'+($_ -replace '"','\"')+'"' }
-[IO.File]::WriteAllLines($relayResponse,$relayResponseLines,[Text.UTF8Encoding]::new($true))
-& (Join-Path $relayDependencies 'roslyn/tasks/net472/csc.exe') ('@'+$relayResponse)
-if($LASTEXITCODE -ne 0){throw '开发版编译失败。'}
+$relayCompiler=Join-Path $relayDependencies 'roslyn/tasks/net472/csc.exe'
+$relayCompileInputs=@($relaySources)+@($relayReferences | Where-Object {[IO.Path]::IsPathRooted($_)})+@((Join-Path $relayRoot 'lite.manifest'),(Join-Path $relayUI 'icon.ico'),$relayCompiler)
+Invoke-RelayCompiler -Executable (Join-Path $relayBuild 'Codex Relay Lite.exe') -Response $relayResponse -Arguments $relayArguments -Inputs $relayCompileInputs
 $relayUpdaterArguments=@('/nologo','/target:winexe','/platform:x64','/optimize+',('/out:'+(Join-Path $relayBuild 'Updater.exe')),('/win32manifest:'+(Join-Path $relayRoot 'lite.manifest')),('/win32icon:'+(Join-Path $relayUI 'icon.ico')))
 foreach($relayReference in @('System.dll','System.Core.dll','System.Windows.Forms.dll','System.Web.Extensions.dll','System.IO.Compression.dll','System.IO.Compression.FileSystem.dll')){$relayUpdaterArguments+=('/reference:'+$relayReference)}
 $relayUpdaterArguments+=(Join-Path $relayRoot 'updater/Program.cs'),(Join-Path $relayRoot 'src/Json.cs'),(Join-Path $relayRoot 'src/UpdatePackage.cs')
 $relayUpdaterResponse=Join-Path $relayBuild 'updater.rsp'
-[IO.File]::WriteAllLines($relayUpdaterResponse,($relayUpdaterArguments | ForEach-Object {'"'+($_ -replace '"','\"')+'"'}),[Text.UTF8Encoding]::new($true))
-& (Join-Path $relayDependencies 'roslyn/tasks/net472/csc.exe') ('@'+$relayUpdaterResponse)
-if($LASTEXITCODE -ne 0){throw '更新器编译失败。'}
+$relayUpdaterInputs=@((Join-Path $relayRoot 'updater/Program.cs'),(Join-Path $relayRoot 'src/Json.cs'),(Join-Path $relayRoot 'src/UpdatePackage.cs'),(Join-Path $relayRoot 'lite.manifest'),(Join-Path $relayUI 'icon.ico'),$relayCompiler)
+Invoke-RelayCompiler -Executable (Join-Path $relayBuild 'Updater.exe') -Response $relayUpdaterResponse -Arguments $relayUpdaterArguments -Inputs $relayUpdaterInputs
 ('Development build ready: v'+$relayVersion+'. No release package was changed.')
