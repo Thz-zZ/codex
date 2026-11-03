@@ -1,7 +1,7 @@
 using System.Reflection;
 
-[assembly: AssemblyTitle("Codex Relay Lite")]
-[assembly: AssemblyProduct("Codex Relay Lite")]
+[assembly: AssemblyTitle("Codex 中转台")]
+[assembly: AssemblyProduct("Codex 中转台")]
 [assembly: AssemblyDescription("Codex 中转管理与用量工作台")]
 [assembly: AssemblyVersion(RelayLite.AppVersion.FileVersion)]
 [assembly: AssemblyFileVersion(RelayLite.AppVersion.FileVersion)]

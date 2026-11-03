@@ -13,7 +13,7 @@ main.sessions-layout>header{flex-shrink:0}
 .session-readonly-tag{background:#eff4fa;border-radius:5px;padding:2px 6px}
 .session-searchbar{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .session-search{display:flex;align-items:center;gap:9px;flex:1;min-width:0;border:1px solid #dfe6ef;background:#fff;border-radius:9px;padding:0 12px;color:#92a1b5}
-.session-search:focus-within{border-color:#b5c7de;box-shadow:0 0 0 3px #b5c7de15}
+.session-search:focus-within{border-color:#b5c7de}
 .session-search input{height:39px;min-width:0;width:100%;border:0;outline:0;background:transparent;font-size:12px;color:#425c7c}
 .session-search input:focus-visible{outline:none}
 .session-search input::placeholder{color:#95a3b7}

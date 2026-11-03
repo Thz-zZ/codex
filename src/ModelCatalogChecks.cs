@@ -36,14 +36,14 @@ internal static class ModelCatalogChecks {
         string first=File.ReadAllText(file);var document=Nett.Toml.ReadString(first).ToDictionary();string path=J.Str(document,"model_catalog_json");var entry=J.Arr(J.Get(J.Read(path,null),"models"));
         Check(Path.IsPathRooted(path)&&File.Exists(path)&&entry.Count==1,"apply writes an absolute local catalog path with one selected model");
         Check(J.Str(entry[0],"slug")=="gpt-codex-fixture"&&J.Str(entry[0],"display_name")=="gpt-codex-fixture","model identity and display name match the applied relay exactly");
-        Check(J.Str(entry[0],"default_reasoning_level")=="high"&&J.Arr(J.Get(entry[0],"supported_reasoning_levels")).Select(level=>J.Str(level,"effort")).SequenceEqual(new[]{"low","medium","high","xhigh","max","ultra"}),"Responses catalog keeps the configured default without locking any Codex effort choices");
-        Check(J.Num(entry[0],"context_window")==272000&&J.Num(entry[0],"effective_context_window_percent")==95,"catalog includes a usable Codex context budgeting window");
+        Check(J.Str(entry[0],"default_reasoning_level")=="high"&&J.Arr(J.Get(entry[0],"supported_reasoning_levels")).Select(level=>J.Str(level,"effort")).SequenceEqual(new[]{"high"}),"unknown-model catalog retains the explicitly chosen default without inventing other supported levels");
+        Check(!J.Has(entry[0],"context_window")&&!J.Has(entry[0],"effective_context_window_percent"),"unknown models do not receive a synthetic context budget");
         Check(!File.ReadAllText(path).Contains("private-catalog-fixture")&&!File.ReadAllText(path).Contains("catalog.example"),"catalog contains no relay address or credential");
         Check(J.True(J.Get(J.Get(document,"features"),"keep"))&&File.ReadAllText(external)=="{\"models\":[]}","unrelated settings and the user's previous catalog file are untouched");
         Check(ModelCatalog.Write(directory,input)==path,"identical model metadata reuses an immutable catalog snapshot");
         input["id"]=id;input["model"]="gpt-codex-mini-fixture";input["reasoning"]="default";store.Upsert(input,true);store.Switch(id);
         var next=Nett.Toml.ReadString(File.ReadAllText(file)).ToDictionary();string nextPath=J.Str(next,"model_catalog_json");var nextEntry=J.Arr(J.Get(J.Read(nextPath,null),"models"))[0];
-        Check(nextPath!=path&&J.Get(nextEntry,"default_reasoning_level")==null&&J.Arr(J.Get(nextEntry,"supported_reasoning_levels")).Count==6,"Responses service default leaves the default unset but keeps all Codex effort choices and creates a separate snapshot");
+        Check(nextPath!=path&&J.Get(nextEntry,"default_reasoning_level")==null&&J.Arr(J.Get(nextEntry,"supported_reasoning_levels")).Count==0,"unknown-model service default leaves the default unset and creates a separate snapshot");
         Check(!J.Has(next,"model_reasoning_effort"),"service default still clears inherited config effort rather than pinning a value");
         Check(J.Str(J.Arr(J.Get(J.Read(path,null),"models"))[0],"display_name")=="gpt-codex-fixture","switching does not overwrite catalogs referenced by older backups");
         string backup=J.Str(J.Arr(J.Get(store.List(),"history"))[0],"id");store.Restore(backup);Check(File.ReadAllText(file)==first&&File.Exists(path),"restoring a backup restores its exact model catalog and config");
@@ -54,10 +54,10 @@ internal static class ModelCatalogChecks {
         var catalog=J.Map("modelSelection","catalog","models",allModels,"model",allModels[249],"reasoning","default");
         var entries=J.Arr(J.Get(ModelCatalog.Create(catalog),"models"));
         Check(entries.Count==250&&J.Str(entries[0],"slug")==allModels[249]&&entries.Select(item=>J.Str(item,"slug")).OrderBy(value=>value).SequenceEqual(allModels),"every fetched model is catalogued, not only the 200-item UI page, with the chosen default first");
-        Check(entries.All(item=>J.Arr(J.Get(item,"supported_reasoning_levels")).Count==6),"all fetched Responses models retain every Codex effort choice");
+        Check(entries.All(item=>J.Arr(J.Get(item,"supported_reasoning_levels")).Count==0),"unknown models do not advertise unverified reasoning levels");
         foreach(string effort in new[]{"max","ultra"}) {
             var selected=J.Arr(J.Get(ModelCatalog.Create(J.Map("model","relay-fixture","reasoning",effort)),"models"))[0];
-            Check(J.Str(selected,"default_reasoning_level")==effort&&J.Arr(J.Get(selected,"supported_reasoning_levels")).Select(level=>J.Str(level,"effort")).SequenceEqual(new[]{"low","medium","high","xhigh","max","ultra"}),"saved max and ultra defaults preserve every other Responses effort choice");
+            Check(J.Str(selected,"default_reasoning_level")==effort&&J.Arr(J.Get(selected,"supported_reasoning_levels")).Select(level=>J.Str(level,"effort")).SequenceEqual(new[]{effort}),"unknown-model max and ultra defaults only declare the chosen value");
         }
         foreach(string protocol in new[]{"chat-completions","anthropic"}){
             bool rejected=false;try{ModelCatalog.Create(J.Map("protocol",protocol,"model","relay-fixture"));}catch{rejected=true;}
@@ -65,28 +65,21 @@ internal static class ModelCatalogChecks {
         }
         checks.Add("complete multi-model catalogs and default priority without truncating the saved list");
         checks.Add("selected model display catalog, selectable effort with optional default, credential isolation, immutable snapshots and exact user-catalog restore");
-        SolContextChecks(root,checks);
+        RemovedPresetChecks(root,checks);
         UpgradeChecks(root,checks);
     }
-    static void SolContextChecks(string root,List<string> checks) {
+    static void RemovedPresetChecks(string root,List<string> checks) {
         string directory=Path.Combine(root,"sol-context"),config=Path.Combine(directory,"config");Directory.CreateDirectory(config);
-        var input=J.Map("name","Sol 500k","baseUrl","https://sol.example/v1","key","fixture-sol-key","model",ModelCatalog.SolModel,"contextPreset",ModelCatalog.SolContextPreset,"modelSelection","catalog","models",new[]{ModelCatalog.SolModel,"gpt-5.6-sol"},"modelMetadata",J.Map(ModelCatalog.SolModel,J.Map("context_window",1000000)));
+        var input=J.Map("name","legacy Sol preset","baseUrl","https://sol.example/v1","key","fixture-sol-key","model","gpt-6.1-sol","contextPreset","sol-500k","modelSelection","catalog","models",new[]{"gpt-6.1-sol","gpt-5.6-sol"},"modelMetadata",J.Map("gpt-6.1-sol",J.Map("context_window",1000000)));
         var store=new Store(directory,config,new Secure());string id=J.Str(store.Upsert(input,true),"id");
-        store=new Store(directory,config,new Secure());Check(J.Str(store.Details(id),"contextPreset")==ModelCatalog.SolContextPreset&&!J.Has(store.Details(id),"modelMetadata"),"explicit Sol context choice survives restart and old fetched metadata is removed");
+        store=new Store(directory,config,new Secure());Check(!J.Has(store.Details(id),"contextPreset")&&!J.Has(store.Details(id),"modelMetadata"),"saving strips the removed preset and fetched capacity metadata");
         store.Switch(id);
         var document=Nett.Toml.ReadString(File.ReadAllText(Path.Combine(config,"config.toml"))).ToDictionary();var entries=J.Arr(J.Get(J.Read(J.Str(document,"model_catalog_json"),null),"models"));
-        Check(J.Str(document,"model")==ModelCatalog.SolModel&&!J.Has(document,"model_context_window"),"Sol 500k keeps the real upstream model ID and does not set a global context override");
-        Check(entries.Count==2&&J.Str(entries[0],"slug")==ModelCatalog.SolModel&&J.Str(entries[0],"display_name")==ModelCatalog.SolContextLabel&&J.Num(entries[0],"context_window")==500000&&J.Num(entries[0],"effective_context_window_percent")==100,"explicit Sol choice produces a named 500k usable-context preset");
-        Check(J.Num(entries[1],"context_window")==272000&&J.Num(entries[1],"effective_context_window_percent")==95,"the Sol preset leaves every other model's budget unchanged");
-        input["id"]=id;input["contextPreset"]="default";store.Upsert(input,true);store.Switch(id);
-        document=Nett.Toml.ReadString(File.ReadAllText(Path.Combine(config,"config.toml"))).ToDictionary();entries=J.Arr(J.Get(J.Read(J.Str(document,"model_catalog_json"),null),"models"));
-        Check(!J.Has(store.Details(id),"contextPreset")&&J.Str(entries[0],"display_name")==ModelCatalog.SolModel&&J.Num(entries[0],"context_window")==272000&&J.Num(entries[0],"effective_context_window_percent")==95,"choosing the normal model restores its original context budget");
-        string before=File.ReadAllText(store.File);
-        foreach(var invalid in new[]{J.Map("model","gpt-5.6-sol","contextPreset",ModelCatalog.SolContextPreset),J.Map("model",ModelCatalog.SolModel,"contextPreset","unknown")}){
-            var changed=J.Obj(J.Clone(input));foreach(var pair in invalid)changed[pair.Key]=pair.Value;
-            bool rejected=false;try{store.Upsert(changed,true);}catch{rejected=true;}Check(rejected&&File.ReadAllText(store.File)==before,"unsupported models and invented context presets cannot change saved settings");
-        }
-        checks.Add("opt-in Sol 500k preset, exact label, original upstream ID, independent model budgets, persistence and ordinary-choice restore");
+        Check(J.Str(document,"model")=="gpt-6.1-sol"&&entries.Count==2&&entries.All(entry=>J.Str(entry,"display_name")==J.Str(entry,"slug")&&J.Num(entry,"context_window")!=500000),"all fetched model IDs retain their ordinary labels and budgets without synthetic variants");
+        var legacy=J.Map("relay_catalog_version",2,"models",new[]{J.Map("slug","gpt-6.1-sol","display_name","6.1 Sol · 500k","context_window",500000,"effective_context_window_percent",100)});
+        string upgraded=ModelCatalog.Upgrade(directory,legacy,"responses");var upgradedEntry=J.Arr(J.Get(J.Read(upgraded,null),"models"))[0];
+        Check(J.Str(upgradedEntry,"display_name")=="gpt-6.1-sol"&&J.Num(upgradedEntry,"context_window")!=500000,"owned legacy 500k catalogs upgrade to the ordinary model with no forced capacity");
+        checks.Add("removed 500k variants, discarded saved preset fields and migration of owned legacy model catalogs");
     }
     static void UpgradeChecks(string root,List<string> checks) {
         string directory=Path.Combine(root,"catalog-upgrade"),config=Path.Combine(directory,"config");Directory.CreateDirectory(config);
@@ -98,8 +91,8 @@ internal static class ModelCatalogChecks {
         Check(store.UpgradeManagedModelCatalog(),"startup upgrades an old owned catalog without reapplying saved provider edits");
         string next=File.ReadAllText(file),nextPath=J.Str(Nett.Toml.ReadString(next).ToDictionary(),"model_catalog_json");var entries=J.Arr(J.Get(J.Read(nextPath,null),"models"));
         Check(next==original.Replace(J.Encode(oldPath),J.Encode(nextPath)),"automatic upgrade changes only the catalog path, preserving model, effort, context overrides, comments and line endings");
-        Check(J.Str(entries[0],"slug")=="applied-model"&&J.Str(entries[0],"default_reasoning_level")=="high"&&J.Arr(J.Get(entries[0],"supported_reasoning_levels")).Count==6,"upgrade preserves the applied model catalog and its defaults, not pending provider edits");
-        Check(J.Num(entries[0],"context_window")==272000&&J.Num(entries[1],"context_window")==128000&&J.Num(entries[1],"effective_context_window_percent")==90,"upgrade fills missing context metadata and preserves existing per-model budgets");
+        Check(J.Str(entries[0],"slug")=="applied-model"&&J.Str(entries[0],"default_reasoning_level")=="high"&&J.Arr(J.Get(entries[0],"supported_reasoning_levels")).Count==1,"upgrade preserves the applied model catalog and its defaults, not pending provider edits");
+        Check(!J.Has(entries[0],"context_window")&&J.Num(entries[1],"context_window")==128000&&J.Num(entries[1],"effective_context_window_percent")==90,"upgrade leaves unknown capacities unspecified and preserves independent budgets");
         Check(File.ReadAllText(oldPath)==content&&!store.UpgradeManagedModelCatalog(),"old snapshots stay immutable and a second startup does not rewrite the config");
         Check(store.CatalogUpgraded&&J.True(J.Get(store.List(),"catalogUpgraded")),"startup upgrade status is exposed to the UI");
         var pending=store.Details(J.Str(J.Arr(J.Get(store.List(),"providers"))[0],"id"));

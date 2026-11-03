@@ -14,6 +14,7 @@ import sys
 import time
 
 from session_manager.deletion import DeletionService, external_codex_clients
+from session_manager.local_usage import LocalUsageReader
 from session_manager.rpc import CodexRpc, discover_codex
 from session_manager.store import InventoryReader, PreviewReader, canonical_path
 from session_manager.transfer import export_bundle, inspect_bundle, ImportService
@@ -33,6 +34,7 @@ class SessionService:
         self.rpc = rpc_factory(self.executable, self.home) if self.executable else None
         self.guard = guard
         self.reader = InventoryReader()
+        self.usage_reader = LocalUsageReader()
         self.current = None
         self.tokens = {}
 
@@ -132,6 +134,9 @@ class SessionService:
             raise ValueError('会话数据目录不存在，请在“读取设置”中选择 Codex 数据目录。')
         if action == 'list':
             return self.list_sessions()
+        if action == 'usage':
+            return self.usage_reader.read(self.home, str(args.get('period', 'today')),
+                                          str(args.get('model', 'all')))
         if action == 'preview':
             return self.preview(args)
         if action == 'prepareDelete':

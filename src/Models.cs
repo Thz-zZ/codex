@@ -10,7 +10,7 @@ internal static class Models {
     static readonly object sync=new object();
     static readonly Dictionary<string,Discovery> discoveries=new Dictionary<string,Discovery>();
     internal static string Fingerprint(object input,string key) {
-        key=key.Trim();if(key.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase))key=key.Substring(7).Trim();
+        key=ModelProtocol.NormalizeKey(key);
         using(var hash=SHA256.Create())return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(J.Encode(new[]{ModelProtocol.ModelRoot(input),ModelProtocol.Protocol(input),key}))));
     }
     internal static List<string> Resolve(string token,object input,string key) {
@@ -22,8 +22,7 @@ internal static class Models {
         return models;
     }
     internal static async Task<object> List(object input){
-        string root=ModelProtocol.ModelRoot(input),key=J.Str(input,"key").Trim();
-        if(key.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase))key=key.Substring(7).Trim();
+        string root=ModelProtocol.ModelRoot(input),key=ModelProtocol.NormalizeKey(J.Str(input,"key"));
         if(key==""||key.Length>4096||key.IndexOfAny(new[]{'\r','\n'})>=0)throw J.Error("请先填写有效的 API 调用密钥。");
         try{
             var ids=new SortedSet<string>(StringComparer.Ordinal);
@@ -50,7 +49,7 @@ internal static class Models {
             string message=Usage.ErrorText(error,key);
             if(message.Contains("HTTP 401"))message="API 密钥无效、已过期或与此中转不匹配。"+message;
             else if(message.Contains("HTTP 403"))message="此密钥没有读取模型列表的权限，或被站点拒绝访问。"+message;
-            else if(message.Contains("HTTP 404")||message.Contains("HTTP 405"))message="该地址未开放模型列表接口，请检查 API 地址和调用协议；添加中转需要先获取可用模型。"+message;
+            else if(message.Contains("HTTP 404")||message.Contains("HTTP 405"))message="该地址未开放模型列表接口；可使用 Codex 内置模型，或检查 API 地址后重试。"+message;
             throw J.Error(message);
         }
     }

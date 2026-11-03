@@ -2,14 +2,17 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const {spawn}=require('node:child_process');
+const {spawn,spawnSync}=require('node:child_process');
 const {once}=require('node:events');
 
-const hostPath=path.resolve(process.argv[2]||'build/codex-provider-tests/CodexProviderTestHost.exe');
+const hostPath=path.resolve(process.argv[2]||'build/current/CodexProviderTestHost.exe');
 const codexPath=process.argv[3]||'codex';
+const nativeResult=spawnSync(codexPath,['debug','models','--bundled'],{windowsHide:true,encoding:'utf8',maxBuffer:16*1024*1024});
+const nativeModels=nativeResult.status===0?JSON.parse(nativeResult.stdout).models:[];
+let fixtureIndex=0;
 
 async function checkModel(selection){
-  const directory=path.resolve('build/model-catalog/fixture-'+Date.now()+'-'+selection.effort);
+  const directory=path.resolve('build/current/provider-test-work/model-catalog/case-'+fixtureIndex++);
   fs.mkdirSync(directory,{recursive:true});
   const host=spawn(hostPath,[directory,'http://127.0.0.1:1/v1',selection.model,selection.protocol,selection.effort,...(selection.models||selection.contextPreset?[JSON.stringify(selection.models||[selection.model]),selection.contextPreset||'default']:[])],{windowsHide:true,stdio:['pipe','pipe','pipe']});
   const hostExit=once(host,'exit');let hostError='',server;
@@ -44,10 +47,10 @@ async function checkModel(selection){
     assert.equal(models.length,selection.models?.length||1,'Codex lists the complete applied catalog');
     assert.deepEqual(models.map(value=>value.model).sort(),[...(selection.models||[selection.model])].sort());
     const model=models.find(value=>value.model===selection.model);
-    assert.equal(model.id,selection.model);assert.equal(model.model,selection.model);assert.equal(model.displayName,selection.contextPreset==='sol-500k'?'6.1 Sol · 500k':selection.model);
+    assert.equal(model.id,selection.model);assert.equal(model.model,selection.model);assert.equal(model.displayName,selection.model);
     assert.equal(model.isDefault,true);assert.equal(model.hidden,false);
     assert.equal(models.filter(value=>value.isDefault).length,1,'only the configured model is the default');
-    for(const entry of models)assert.deepEqual(entry.supportedReasoningEfforts.map(value=>value.reasoningEffort),['low','medium','high','xhigh','max','ultra'],'a configured default leaves all Responses effort choices available');
+    for(const entry of models){const native=nativeModels.find(value=>value.slug===entry.model);const levels=native?.supported_reasoning_levels?.map(value=>value.effort)||(entry.model===selection.model&&selection.effort!=='default'?[selection.effort]:[]);assert.deepEqual(entry.supportedReasoningEfforts.map(value=>value.reasoningEffort),levels,'model choices retain native supported efforts and do not invent capabilities for unknown aliases');}
     if(selection.effort!=='default')assert.equal(model.defaultReasoningEffort,selection.effort);
     fs.writeFileSync(path.join(directory,'result.json'),JSON.stringify({ok:true,...selection,models},null,2));
     console.log(JSON.stringify({ok:true,...selection,displayName:model.displayName,visibleModels:models.length,fixture:directory}));

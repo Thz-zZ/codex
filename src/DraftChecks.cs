@@ -18,8 +18,8 @@ internal static class DraftChecks {
             var selection=J.Map("name","required selections","baseUrl","https://selection.example/v1","key","fixture-selection-key","modelFamily","codex","protocol",protocol,"model","selected-fixture","reasoning","default");
             foreach(string field in new[]{"model"})foreach(string missing in new[]{"","   "}){
                 var invalid=J.Obj(J.Clone(selection));invalid[field]=missing;int count=selectedStore.JCount();bool rejected=false;try{selectedStore.Upsert(invalid,true);}catch(Exception error){rejected=error.Message.Contains(field=="model"?"模型":"推理强度");}
-                Check(rejected&&selectedStore.JCount()==count,"Codex requires an explicit default model before saving");
-                invalid.Remove(field);rejected=false;try{selectedStore.Upsert(invalid,true);}catch{rejected=true;}Check(rejected&&selectedStore.JCount()==count,"omitted selection cannot bypass validation");
+                Check(!rejected&&J.Str(J.Arr(J.Get(selectedStore.Data,"providers")).Last(),"modelSelection")=="builtin","blank default model uses Codex built-in defaults without discovery");
+                invalid.Remove(field);var builtin=selectedStore.Upsert(invalid,true,true);Check(J.Str(builtin,"modelSelection")=="builtin"&&J.Str(builtin,"model")=="","omitted selection permits built-in models without HTTP");
             }
             foreach(string missing in new[]{"","   ",null}){
                 var optional=J.Obj(J.Clone(selection));if(missing==null)optional.Remove("reasoning");else optional["reasoning"]=missing;
@@ -41,7 +41,10 @@ internal static class DraftChecks {
         var selectedConfig=Nett.Toml.ReadString(File.ReadAllText(Path.Combine(selectedStore.ConfigDir,"config.toml"))).ToDictionary();
         Check(!J.Has(selectedConfig,"model_reasoning_effort")&&J.True(J.Get(J.Get(selectedConfig,"features"),"keep")),"service default removes inherited effort without writing an invalid default effort or touching other settings");
         selectedStore=new Store(selectedStore.Dir,selectedStore.ConfigDir,new Secure());Check(J.Str(selectedStore.Details(J.Str(selected,"id")),"reasoning")=="default","explicit service default survives restart");
-        checks.Add("mandatory Codex default model, optional reasoning, edit validation and invalid effort rejection");
+        selected["modelSelection"]="builtin";selected["model"]="";selectedStore.Upsert(selected,true,true);selectedStore.Switch(J.Str(selected,"id"));
+        selectedConfig=Nett.Toml.ReadString(File.ReadAllText(Path.Combine(selectedStore.ConfigDir,"config.toml"))).ToDictionary();
+        Check(!J.Has(selectedConfig,"model")&&!J.Has(selectedConfig,"model_catalog_json")&&J.True(J.Get(J.Get(selectedConfig,"features"),"keep")),"built-in mode clears the prior custom default and catalog while retaining unrelated settings");
+        checks.Add("optional built-in models and default, explicit catalog selection, optional reasoning and invalid effort rejection");
         checks.Add("optional default persistence and direct config clearing without invalid reasoning values");
         string before=File.ReadAllText(store.File);var paths=new List<string>();var input=J.Map("baseUrl","fixture.example/v1","siteUrl","","key","fixture-draft-key","adapter","auto");
         try{

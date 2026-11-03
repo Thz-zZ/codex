@@ -11,27 +11,37 @@ internal static class DraftUiSmoke {
         foreach(string type in new[]{"mouseMoved","mousePressed","mouseReleased"})await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",J.Encode(J.Map("type",type,"x",J.Get(point,"x"),"y",J.Get(point,"y"),"button",type=="mouseMoved"?"none":"left","clickCount",type=="mouseMoved"?0:1)));
     }
     static async Task CheckRefreshPointer(CoreWebView2 core,string dir){
-        await core.ExecuteScriptAsync("window.refreshPointerSaved={api:window.relay,auto};window.refreshPointerCalls=0;window.relay={...window.relay,inspect:input=>{window.refreshPointerCalls++;return refreshPointerSaved.api.inspect(input);}};openDetails(state.providers.find(p=>!p.active).id);filterPickers.get('period').open();");
+        await core.ExecuteScriptAsync("window.refreshPointerSaved={api:window.relay};window.refreshPointerCalls=0;window.refreshPointerBalanceCalls=0;window.relay={...window.relay,localUsage:input=>{window.refreshPointerCalls++;return refreshPointerSaved.api.localUsage(input);},inspect:input=>{window.refreshPointerBalanceCalls++;return refreshPointerSaved.api.inspect(input);}};openDetails(state.providers.find(p=>!p.active).id);filterPickers.get('period').open();");
         try{
-            await PointerClick(core,"pauseAuto");
-            for(int attempt=0;attempt<100;attempt++){if(await core.ExecuteScriptAsync("!autoSavePending")=="true")break;await Task.Delay(50);}
-            if(await core.ExecuteScriptAsync("auto!==refreshPointerSaved.auto")!="true")throw J.Error("Pause button did not respond to pointer input.");
             await PointerClick(core,"refreshDetail");
             for(int attempt=0;attempt<200;attempt++){
-                if(await core.ExecuteScriptAsync("refreshPointerCalls===1&&!pending.size&&!$('refreshDetail').disabled")=="true"){
-                    await PointerClick(core,"pauseAuto");
-                    for(int saveAttempt=0;saveAttempt<100;saveAttempt++){if(await core.ExecuteScriptAsync("!autoSavePending")=="true")break;await Task.Delay(50);}
-                    J.Atomic(Path.Combine(dir,"refresh-pointer-result.json"),J.Encode(J.Map("ok",true,"pausePointer",true,"manualRefreshPointer",true,"inactiveRelay",true)));return;
+                if(await core.ExecuteScriptAsync("refreshPointerCalls===1&&refreshPointerBalanceCalls===0&&!pending.size&&!$('refreshDetail').disabled")=="true"){
+                    J.Atomic(Path.Combine(dir,"refresh-pointer-result.json"),J.Encode(J.Map("ok",true,"manualRefreshPointer",true,"inactiveRelay",true)));return;
                 }
                 await Task.Delay(50);
             }
             throw J.Error("Manual refresh did not complete after pointer input.");
-        }finally{await core.ExecuteScriptAsync("window.relay=refreshPointerSaved.api;auto=refreshPointerSaved.auto;");}
+        }finally{await core.ExecuteScriptAsync("window.relay=refreshPointerSaved.api;");}
     }
-    const string ViewSnapshot="({id:detailId,period:rangePeriod,model:$('modelFilter').value,granularity:chartGranularity,hiddenSeries:[...hiddenSeries],matchingData:currentDetail?.period===rangePeriod&&currentDetail?.model===$('modelFilter').value})";
+    static async Task CheckProviderMenuPointer(CoreWebView2 core,string dir){
+        await core.ExecuteScriptAsync("window.menuPointerSaved={id:detailId,body:$('detailBody').firstElementChild};window.menuPointerId=state.providers.find(p=>p.id!==detailId).id;closeProviderMenu();");
+        var point=J.Decode(await core.ExecuteScriptAsync("(()=>{const card=$('providerList').querySelector(`[data-id=\"${CSS.escape(menuPointerId)}\"]`),box=card.getBoundingClientRect();return {x:box.left+box.width/2,y:box.top+box.height/2};})()"));
+        await core.CallDevToolsProtocolMethodAsync("Emulation.setEmulatedMedia",J.Encode(J.Map("features",new[]{J.Map("name","prefers-reduced-motion","value","no-preference")})));
+        try{
+            foreach(string type in new[]{"mouseMoved","mousePressed","mouseReleased"})await core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",J.Encode(J.Map("type",type,"x",J.Get(point,"x"),"y",J.Get(point,"y"),"button",type=="mouseMoved"?"none":"right","clickCount",type=="mouseMoved"?0:1)));
+            string report=await core.ExecuteScriptAsync("(()=>{const menu=$('providerMenu');return {open:menu.matches(':popover-open'),correctRelay:menu.dataset.id===menuPointerId,preservedView:detailId===menuPointerSaved.id&&$('detailBody').firstElementChild===menuPointerSaved.body,animated:menu.getAnimations().some(animation=>animation.effect.getTiming().duration===180),actions:menu.querySelectorAll('[role=menuitem]').length};})()");
+            var checks=J.Decode(report);foreach(string key in new[]{"open","correctRelay","preservedView","animated"})if(!J.True(J.Get(checks,key)))throw J.Error("Provider context menu pointer ("+key+"): "+report);
+            await Task.Delay(210);
+            using(var preview=File.Create(Path.Combine(dir,"provider-context-menu.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,preview);
+            await core.CallDevToolsProtocolMethodAsync("Emulation.setEmulatedMedia",J.Encode(J.Map("features",new[]{J.Map("name","prefers-reduced-motion","value","reduce")})));
+            if(await core.ExecuteScriptAsync("closeProviderMenu();openProviderMenu(menuPointerId,120,180);$('providerMenu').matches(':popover-open')&&$('providerMenu').getAnimations().length===0")!="true")throw J.Error("Provider context menu must respect reduced motion.");
+            J.Atomic(Path.Combine(dir,"provider-context-menu-result.json"),J.Encode(J.Map("ok",true,"pointer",checks,"reducedMotion",true)));
+        }finally{await core.ExecuteScriptAsync("closeProviderMenu()");await core.CallDevToolsProtocolMethodAsync("Emulation.setEmulatedMedia","{\"features\":[]}");}
+    }
+    const string ViewSnapshot="({id:detailId,period:rangePeriod,model:$('modelFilter').value,matchingData:currentDetail?.period===rangePeriod&&currentDetail?.model===$('modelFilter').value})";
     static async Task CheckRequestTable(CoreWebView2 core,string dir,bool compact){
         if(!compact)await core.CallDevToolsProtocolMethodAsync("Emulation.setDeviceMetricsOverride",J.Encode(J.Map("width",1440,"height",900,"deviceScaleFactor",1,"mobile",false)));
-        await core.ExecuteScriptAsync("(()=>{window.requestTableSavedScroll=document.querySelector('main').scrollTop;const fixture=document.createElement('div');fixture.id='requestTableLayoutFixture';fixture.innerHTML=tableCard('近期请求',['时间','模型','输入 Token','输出 Token','缓存读取','缓存写入','缓存率'],Array.from({length:24},(_,index)=>['2026/10/18 18:20:33',index===1?'gpt-codex-'+('long-relay-model-'.repeat(6)):'gpt-codex-fixture','54,308','1,530','40,182','14,124','73.99%']),'暂无近期请求。','recent-requests');$('detailBody').append(fixture);fixture.scrollIntoView({block:'start'});})()");
+        await core.ExecuteScriptAsync("(()=>{window.requestTableSavedScroll=document.querySelector('main').scrollTop;const fixture=document.createElement('div');fixture.id='requestTableLayoutFixture';fixture.innerHTML=tableCard('近期请求',['时间','模型','输入 Token','输出 Token','缓存读取','缓存率'],Array.from({length:24},(_,index)=>['2026/10/18 18:20:33',index===1?'gpt-codex-'+('long-relay-model-'.repeat(6)):'gpt-codex-fixture','54,308','1,530','40,182','73.99%']),'暂无近期请求。','recent-requests');$('detailBody').append(fixture);fixture.scrollIntoView({block:'start'});})()");
         try{
             await Task.Delay(100);
             string report=await core.ExecuteScriptAsync("(()=>{const card=$('requestTableLayoutFixture').querySelector('.recent-requests'),scroll=card.querySelector('.table-scroll'),table=card.querySelector('table'),headers=[...table.querySelectorAll('th')],cells=[...table.querySelector('tbody tr').cells],widths=headers.map(cell=>cell.getBoundingClientRect().width),main=document.querySelector('main'),long=table.querySelectorAll('tbody tr')[1].cells[1];scroll.scrollLeft=scroll.scrollWidth;scroll.scrollTop=100;const box=scroll.getBoundingClientRect(),last=cells.at(-1).getBoundingClientRect();return {columns:headers.length,viewportWidth:innerWidth,availableWidth:scroll.clientWidth,tableWidth:table.getBoundingClientRect().width,equalColumns:Math.max(...widths)-Math.min(...widths)<1,leftAligned:[...headers,...cells].every(cell=>getComputedStyle(cell).textAlign==='left'),headerAlignment:headers.every((header,index)=>Math.abs(header.getBoundingClientRect().left-cells[index].getBoundingClientRect().left)<1),scrollbarGap:box.left+scroll.clientLeft+scroll.clientWidth-last.right,lastColumnReachable:last.left>=box.left&&last.right<=box.left+scroll.clientWidth-8,verticalScroll:scroll.scrollHeight>scroll.clientHeight,horizontalScroll:scroll.scrollWidth>scroll.clientWidth,headerSticky:Math.abs(headers[0].getBoundingClientRect().top-box.top)<1,longModelWrapped:long.scrollWidth<=long.clientWidth&&getComputedStyle(long).whiteSpace==='normal'&&getComputedStyle(long).textOverflow!=='ellipsis',noPageOverflow:main.scrollWidth<=main.clientWidth,scrollbarButtonsHidden:getComputedStyle(scroll,'::-webkit-scrollbar-button').display==='none'};})()");
@@ -44,7 +54,7 @@ internal static class DraftUiSmoke {
     }
     static string trayView;
     internal static async Task PrepareTrayView(CoreWebView2 core){
-        await core.ExecuteScriptAsync("window.detailViewTrayPrepared=null;(async()=>{await openDetails(state.providers.find(p=>p.active).id);await applyRange('7');$('modelFilter').value='gpt-codex';rememberDetailView();await refreshDetails(false);document.querySelector('[data-grain=day]')?.click();document.querySelector('[data-series=plain]').click();await detailViewSave;window.detailViewTrayPrepared=true;})().catch(error=>window.detailViewTrayPrepared=String(error));");
+        await core.ExecuteScriptAsync("window.detailViewTrayPrepared=null;(async()=>{await openDetails(state.providers.find(p=>p.active).id);await applyRange('7');$('modelFilter').value='gpt-codex';rememberDetailView();await refreshDetails(false);await detailViewSave;window.detailViewTrayPrepared=true;})().catch(error=>window.detailViewTrayPrepared=String(error));");
         for(int n=0;n<200;n++){
             string result=await core.ExecuteScriptAsync("window.detailViewTrayPrepared");
             if(result=="true"){trayView=await core.ExecuteScriptAsync(ViewSnapshot);return;}
@@ -56,12 +66,12 @@ internal static class DraftUiSmoke {
     internal static async Task CheckTrayView(CoreWebView2 core,string dir){
         string restored=await core.ExecuteScriptAsync(ViewSnapshot);
         if(restored!=trayView||!J.True(J.Get(J.Decode(restored),"matchingData")))throw J.Error("Tray reopen lost the relay filters or matching cache: "+restored+"; expected "+trayView);
-        J.Atomic(Path.Combine(dir,"detail-view-result.json"),J.Encode(J.Map("ok",true,"perRelayFilters",true,"customDates",true,"modelCache",true,"trayRestore",true,"freshProcessDefaults",true)));
+        J.Atomic(Path.Combine(dir,"detail-view-result.json"),J.Encode(J.Map("ok",true,"globalFilters",true,"customDates",true,"modelCache",true,"trayRestore",true,"freshProcessDefaults",true)));
     }
     static async Task CheckRequiredSelections(CoreWebView2 core,string dir){
         await core.ExecuteScriptAsync("openEditor()");
         try{
-            string report=await core.ExecuteScriptAsync("(()=>{const ids=['modelName'];return {empty:ids.every(id=>$(id).value===''),required:ids.every(id=>$(id).required),visiblePlaceholders:!$('reasoning').required&&$('reasoning').value==='default'&&!$('reasoningPicker').classList.contains('is-required-empty'),modelPlaceholder:$('modelName').classList.contains('is-required-empty')&&$('modelName').placeholder.includes('选择默认模型'),compactForm:!document.querySelector('#providerDialog .fixed-provider-value,#providerDialog .codex-connection')&&!$('protocolHelp')&&!$('providerPreset')&&!$('protocol')&&$('providerDialog').querySelector('.dialog-body label').contains($('providerName'))};})()");
+            string report=await core.ExecuteScriptAsync("(()=>{const ids=['modelName'];return {empty:ids.every(id=>$(id).value===''),required:ids.every(id=>!$(id).required&&$(id).readOnly),visiblePlaceholders:!$('reasoning').required&&$('reasoning').value==='default'&&!$('reasoningPicker').classList.contains('is-required-empty'),modelPlaceholder:!$('modelName').classList.contains('is-required-empty')&&$('modelName').placeholder.includes('内置默认模型'),compactForm:!document.querySelector('#providerDialog .fixed-provider-value,#providerDialog .codex-connection')&&!$('protocolHelp')&&!$('providerPreset')&&!$('protocol')&&$('providerDialog').querySelector('.dialog-body label').contains($('providerName'))};})()");
             var checks=J.Decode(report);foreach(string key in new[]{"empty","required","visiblePlaceholders","modelPlaceholder","compactForm"})if(!J.True(J.Get(checks,key)))throw J.Error("Required editor selections ("+key+"): "+report);
             J.Atomic(Path.Combine(dir,"required-selections.json"),report);
             await core.ExecuteScriptAsync("$('providerDialog').querySelector('.dialog-body').scrollTop=0");
@@ -70,6 +80,23 @@ internal static class DraftUiSmoke {
             await core.ExecuteScriptAsync("$('modelName').scrollIntoView({block:'center'})");
             await Task.Delay(100);
             using(var preview=File.Create(Path.Combine(dir,"required-selections-model.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,preview);
+            await core.ExecuteScriptAsync("$('accountOptions').scrollIntoView({block:'center'})");
+            await Task.Delay(100);
+            using(var preview=File.Create(Path.Combine(dir,"balance-disabled.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,preview);
+            await PointerClick(core,"balanceEnabled");
+            await core.ExecuteScriptAsync("$('adapterPicker').querySelector('button').id='balanceTypeTrigger'");
+            await PointerClick(core,"balanceTypeTrigger");
+            await PointerClick(core,"adapterOption1");
+            if(await core.ExecuteScriptAsync("draftQuery().adapter==='newapi'&&!$('balanceFields').classList.contains('hidden')&&!$('newapiFields').classList.contains('hidden')&&$('adapterMenu').classList.contains('hidden')")!="true")throw J.Error("Balance type pointer selection did not open the NewAPI parameters.");
+            await core.ExecuteScriptAsync("$('accountOptions').scrollIntoView({block:'start'})");
+            await Task.Delay(100);
+            using(var preview=File.Create(Path.Combine(dir,"balance-newapi.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,preview);
+            await PointerClick(core,"balanceTypeTrigger");
+            await PointerClick(core,"adapterOption2");
+            if(await core.ExecuteScriptAsync("draftQuery().adapter==='sub2api'&&$('newapiFields').classList.contains('hidden')&&$('accountUserId').disabled")!="true")throw J.Error("Balance type pointer selection did not hide the NewAPI-only parameters.");
+            await core.ExecuteScriptAsync("$('accountOptions').scrollIntoView({block:'start'})");
+            await Task.Delay(100);
+            using(var preview=File.Create(Path.Combine(dir,"balance-sub2api.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,preview);
         }finally{await core.ExecuteScriptAsync("closeEditor()");}
     }
     public static async Task Run(CoreWebView2 core,string dir){
@@ -85,6 +112,7 @@ internal static class DraftUiSmoke {
                 J.Atomic(Path.Combine(dir,"draft-editor-result.json"),json);
                 if(!J.True(J.Get(J.Decode(json),"ok")))throw J.Error(json);
                 await CheckRefreshPointer(core,dir);
+                await CheckProviderMenuPointer(core,dir);
                 await core.ExecuteScriptAsync("$('toast').classList.add('hidden');$('sortFeedback').classList.remove('visible')");
                 await CheckRequestTable(core,dir,false);
                 await core.ExecuteScriptAsync("openEditor(state.providers.find(p=>p.adapter==='newapi').id)");
@@ -97,7 +125,7 @@ internal static class DraftUiSmoke {
                 await Task.Delay(150);
                 using(var effortPreview=File.Create(Path.Combine(dir,"reasoning-picker.png")))await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,effortPreview);
                 await core.ExecuteScriptAsync("filterPickers.get('reasoning').close()");
-                await core.ExecuteScriptAsync("$('accountOptions').open=true;$('accountKey').value='smoke-account-fixture';$('accountUserId').value='bad';updateAccountForm();");
+                await core.ExecuteScriptAsync("$('balanceEnabled').checked=true;$('adapter').value='newapi';$('accountKey').value='smoke-account-fixture';$('accountUserId').value='bad';updateAccountForm();");
                 await Task.Delay(100);
                 await core.ExecuteScriptAsync("testConnectionFromForm()");
                 await core.ExecuteScriptAsync("$('testConnection').scrollIntoView({block:'center'});");
@@ -129,9 +157,9 @@ internal static class DraftUiSmoke {
             await core.ExecuteScriptAsync("filterPickers.get("+J.Encode(id)+").close();");
             if(fits!="true")throw J.Error("Compact dropdown is clipped: "+id);
         }
-        string report=await core.ExecuteScriptAsync("(()=>{const toolbar=document.querySelector('.detail-toolbar').getBoundingClientRect(),controls=document.querySelector('.detail-refresh-controls'),box=controls.getBoundingClientRect(),model=document.querySelector('.model-field').getBoundingClientRect(),time=$('detailRefreshTime'),stamp=time.getBoundingClientRect();return {noHorizontalOverflow:document.querySelector('main').scrollWidth<=document.querySelector('main').clientWidth,sidebarFits:document.querySelector('.sidebar').scrollHeight<=document.querySelector('.sidebar').clientHeight,metricsFit:[...document.querySelectorAll('.metric-value')].every(el=>el.scrollWidth<=el.clientWidth),refreshTimeFits:stamp.top>=toolbar.top&&stamp.bottom<=model.top&&stamp.right<=toolbar.right&&time.scrollWidth<=time.clientWidth,refreshControlsFit:box.left>=model.right&&box.right<=toolbar.right&&controls.scrollWidth<=controls.clientWidth&&[...controls.querySelectorAll('button')].every(el=>el.getBoundingClientRect().bottom<=toolbar.bottom)};})()");
+        string report=await core.ExecuteScriptAsync("(()=>{const toolbar=document.querySelector('.detail-toolbar').getBoundingClientRect(),controls=document.querySelector('.detail-refresh-controls'),box=controls.getBoundingClientRect(),model=document.querySelector('.model-field').getBoundingClientRect(),time=$('detailRefreshTime'),stamp=time.getBoundingClientRect(),status=$('detailSyncStatus'),statusBox=status.getBoundingClientRect();return {noHorizontalOverflow:document.querySelector('main').scrollWidth<=document.querySelector('main').clientWidth,sidebarFits:document.querySelector('.sidebar').scrollHeight<=document.querySelector('.sidebar').clientHeight,metricsFit:[...document.querySelectorAll('.metric-value')].every(el=>el.scrollWidth<=el.clientWidth),refreshTimeFits:stamp.top>=model.bottom&&stamp.bottom<=toolbar.bottom&&stamp.right<=toolbar.right&&time.scrollWidth<=time.clientWidth,syncStatusFits:statusBox.left>=toolbar.left&&statusBox.right<=stamp.left&&statusBox.bottom<=toolbar.bottom&&status.scrollWidth<=status.clientWidth,compactToolbar:toolbar.height<=68,refreshControlsFit:box.left>=model.right&&box.right<=toolbar.right&&controls.scrollWidth<=controls.clientWidth&&[...controls.querySelectorAll('button')].every(el=>el.getBoundingClientRect().bottom<=toolbar.bottom)};})()");
         var checks=J.Decode(report);
-        if(!J.True(J.Get(checks,"noHorizontalOverflow"))||!J.True(J.Get(checks,"sidebarFits"))||!J.True(J.Get(checks,"metricsFit"))||!J.True(J.Get(checks,"refreshControlsFit"))||!J.True(J.Get(checks,"refreshTimeFits")))throw J.Error("Compact workspace layout: "+report);
+        if(!J.True(J.Get(checks,"noHorizontalOverflow"))||!J.True(J.Get(checks,"sidebarFits"))||!J.True(J.Get(checks,"metricsFit"))||!J.True(J.Get(checks,"refreshControlsFit"))||!J.True(J.Get(checks,"refreshTimeFits"))||!J.True(J.Get(checks,"syncStatusFits"))||!J.True(J.Get(checks,"compactToolbar")))throw J.Error("Compact workspace layout: "+report);
         string addFits=await core.ExecuteScriptAsync("(()=>{const button=$('addProvider'),box=button.getBoundingClientRect(),brand=document.querySelector('.brand').getBoundingClientRect(),copy=document.querySelector('.brand-copy').getBoundingClientRect();return button.closest('.brand')&&box.left>=copy.right&&box.right<=brand.right+1&&box.top>=brand.top&&box.bottom<=brand.bottom+1&&box.width<=36&&!document.querySelector('.sidebar-add');})()");
         if(addFits!="true")throw J.Error("Compact brand add icon overlaps the brand or sidebar.");
         await core.ExecuteScriptAsync("openEditor()");

@@ -17,7 +17,7 @@ internal static class ModelsChecks {
             var catalogInput=J.Map("name","all model fixture","baseUrl",J.Str(input,"baseUrl"),"key",J.Str(input,"key"),"modelFamily","codex","protocol","responses","model",models[1],"reasoning","default","discoveryToken",J.Str(result,"discoveryToken"));
             var allProvider=store.Upsert(catalogInput,true,true);string allId=J.Str(allProvider,"id");
             Check(J.Str(allProvider,"modelSelection")=="catalog"&&J.Arr(J.Get(allProvider,"models")).Select(J.S).SequenceEqual(models),"backend saves the full verified discovery list");
-            Check(!J.Has(allProvider,"modelMetadata")&&!J.Has(result,"contextConfiguredCount")&&J.Arr(J.Get(ModelCatalog.Create(allProvider),"models")).All(entry=>J.Num(entry,"context_window")==272000),"model discovery saves IDs only and never automatically imports upstream context settings");
+            Check(!J.Has(allProvider,"modelMetadata")&&!J.Has(result,"contextConfiguredCount")&&J.Arr(J.Get(ModelCatalog.Create(allProvider),"models")).All(entry=>!J.Has(entry,"context_window")),"model discovery saves IDs only and never automatically imports upstream context settings");
             catalogInput["id"]=allId;catalogInput.Remove("discoveryToken");catalogInput["key"]="";catalogInput["model"]=models[0];
             store=new Store(dir,config,new Secure());store.Upsert(catalogInput,true,true);store.Switch(allId);
             Check(J.Str(store.ConfigInfo(),"model")==models[0]&&J.Arr(J.Get(store.Details(allId),"models")).Count==2,"saved discovery survives restart and changing only the default requires no HTTP request");
@@ -39,7 +39,7 @@ internal static class ModelsChecks {
             var familyInput=J.Map("name","Codex relay","baseUrl","https://shared-relay.example/v1","key","fixture-family-key","accountKey","fixture-family-account","adapter","sub2api","model","relay-aliased-model","modelFamily","codex","protocol","responses");
             var familyProvider=store.Upsert(familyInput);string familyId=J.Str(familyProvider,"id");
             store=new Store(dir,config,new Secure());var familyDetails=store.Details(familyId);
-            Check(J.Str(familyDetails,"modelFamily")=="codex"&&J.Str(familyDetails,"protocol")=="responses"&&J.Str(familyDetails,"adapter")=="sub2api"&&J.Str(familyDetails,"baseUrl")=="https://shared-relay.example","Codex type persists with a custom relay host and independent statistics adapter");
+            Check(J.Str(familyDetails,"modelFamily")=="codex"&&J.Str(familyDetails,"protocol")=="responses"&&J.Str(familyDetails,"adapter")=="sub2api"&&J.Str(familyDetails,"baseUrl")=="https://shared-relay.example/v1","Codex type persists with a custom relay host and independent statistics adapter");
             familyInput["id"]=familyId;familyInput.Remove("modelFamily");familyInput.Remove("protocol");familyInput["key"]="";familyInput["accountKey"]="";store.Upsert(familyInput);familyDetails=store.Details(familyId);
             Check(J.Str(familyDetails,"modelFamily")=="codex"&&J.Str(familyDetails,"protocol")=="responses"&&J.Str(familyDetails,"key")=="fixture-family-key"&&J.Str(familyDetails,"accountKey")=="fixture-family-account","single-product defaults preserve encrypted relay credentials");
             familyInput["modelFamily"]="invalid-family";rejected=false;try{store.Upsert(familyInput);}catch{rejected=true;}Check(rejected&&J.Str(store.Details(familyId),"modelFamily")=="codex","unsupported model family is rejected without changing a relay");

@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import sqlite3
 import sys
+from datetime import datetime, timezone, timedelta
 
 root = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(root/'session-backend'), str(root/'session-backend/tests')]
@@ -29,4 +30,22 @@ if not inventory(home).sessions:
         'type': 'function_call', 'name': 'layout_check',
         'arguments': '{"width":960,"height":650}'}}))
     path.write_text('\n'.join(lines)+'\n', encoding='utf-8')
+parent = next(s for s in inventory(home).sessions.values() if s.title == '界面布局与交互优化')
+path = Path(next(iter(parent.paths)))
+lines = [line for line in path.read_text(encoding='utf-8').splitlines()
+         if '"relay_usage_fixture"' not in line]
+pricing = {'models': [{'modelId': model, 'inputCostPerMillion': '2',
+                       'outputCostPerMillion': '10', 'cacheReadCostPerMillion': '0.1',
+                       'cacheCreationCostPerMillion': '2.5'}
+                      for model in ('gpt-codex', 'gpt-codex-mini')]}
+(home/'relay-model-pricing.json').write_text(json.dumps(pricing), encoding='utf-8')
+for i, model in enumerate(('gpt-codex', 'gpt-codex-mini')):
+    stamp = (datetime.now(timezone.utc)-timedelta(minutes=10-i)).isoformat()
+    lines.append(json.dumps({'timestamp': stamp, 'type': 'turn_context',
+                            'relay_usage_fixture': True, 'payload': {'model': model}}))
+    lines.append(json.dumps({'timestamp': stamp, 'type': 'event_msg', 'relay_usage_fixture': True,
+        'payload': {'type': 'token_count', 'info': {'http_status_code': 200 if i == 0 else None, 'last_token_usage': {
+            'input_tokens': 1000, 'cached_input_tokens': 800, 'cache_write_input_tokens': 20,
+            'output_tokens': 50}}}}))
+path.write_text('\n'.join(lines)+'\n', encoding='utf-8')
 print('Synthetic session fixture ready:', len(inventory(home).sessions))

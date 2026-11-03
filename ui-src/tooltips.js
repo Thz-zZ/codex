@@ -3,7 +3,7 @@
   class RelayTooltips {
     constructor(){
       this.panel=document.createElement('div');this.panel.id='relayTooltip';this.panel.className='relay-tooltip';this.panel.setAttribute('role','tooltip');this.panel.setAttribute('popover','manual');this.panel.setAttribute('aria-hidden','true');document.body.appendChild(this.panel);
-      const hover=event=>{if(document.body.classList.contains('sorting-providers')){this.hide();return;}const target=event.target.closest('[data-tooltip],button[aria-label]');if(!target||target.disabled){this.hide();return;}this.show(target);};
+      const hover=event=>{if(document.body.classList.contains('sorting-providers')){this.hide();return;}const target=event.target.closest('[data-tooltip],button[aria-label]');if(!target||(target.disabled&&!target.dataset.tooltip)){this.hide();return;}this.show(target);};
       document.addEventListener('pointerover',hover);document.addEventListener('pointermove',hover);
       document.addEventListener('pointerout',event=>{if(this.target&&!this.target.contains(event.relatedTarget))this.hide();});
       document.addEventListener('pointerdown',()=>this.hide(),true);
@@ -20,6 +20,7 @@
       this.observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title']});
     }
     show(target){
+      if(target.closest('[data-tooltips="off"]')){this.hide();return;}
       const text=target.dataset.tooltip||target.getAttribute('aria-label');if(!text?.trim()){this.hide();return;}
       if(this.target===target&&this.panel.textContent===text&&this.panel.matches(':popover-open'))return;
       this.hide();this.target=target;this.panel.textContent=text;this.panel.setAttribute('aria-hidden','false');

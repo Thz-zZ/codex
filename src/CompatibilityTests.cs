@@ -15,11 +15,21 @@ internal static class CompatibilityTests {
     }
     public static void Run(List<string> checks,string root) {
         WindowPlacementChecks.Run(root,checks);
+        if(MainForm.BalanceRefreshInterval!=5*60*1000)throw J.Error("Tray balance refresh must run every five minutes.");
+        if(MainForm.LocalRefreshInterval!=60*1000)throw J.Error("Tray local records must refresh every minute.");
+        checks.Add("independent five-minute balance and one-minute local refresh cadences");
         string refreshDirectory=Path.Combine(root,"refresh-preference");var refreshStore=new Store(refreshDirectory,Path.Combine(root,"fake-codex"),new Secure());
-        if(!refreshStore.AutoRefresh)throw J.Error("Existing installations must keep automatic refresh enabled.");
-        refreshStore.SetAppSetting("autoRefresh",false);if(new Store(refreshDirectory,refreshStore.ConfigDir,new Secure()).AutoRefresh)throw J.Error("Pause was not persisted for native tray refresh.");
-        refreshStore.SetAppSetting("autoRefresh",true);if(!new Store(refreshDirectory,refreshStore.ConfigDir,new Secure()).AutoRefresh)throw J.Error("Resume was not persisted.");
-        checks.Add("automatic-refresh preference defaults, native persistence and restart restoration");
+        J.Obj(J.Get(refreshStore.Data,"appSettings"))["autoRefresh"]=false;refreshStore.Save();
+        refreshStore=new Store(refreshDirectory,refreshStore.ConfigDir,new Secure());
+        if(J.Has(J.Get(refreshStore.Data,"appSettings"),"autoRefresh"))throw J.Error("Removed pause preference must not disable ongoing automatic refresh.");
+        var legacyBalance=refreshStore.Upsert(J.Map("name","legacy balance","baseUrl","https://legacy-balance.example","key","fixture-legacy-balance"));
+        if(J.Str(legacyBalance,"adapter")!="none")throw J.Error("New providers must default to disabled balance queries.");
+        var legacyProvider=J.Obj(J.Arr(J.Get(refreshStore.Data,"providers"))[0]);legacyProvider["adapter"]="auto";legacyProvider["detectedAdapter"]="newapi";string previousRevision=J.Str(legacyProvider,"revision");refreshStore.Save();
+        refreshStore=new Store(refreshDirectory,refreshStore.ConfigDir,new Secure());legacyBalance=refreshStore.Details(J.Str(legacyBalance,"id"));
+        if(J.Str(legacyBalance,"adapter")!="none"||J.Has(legacyBalance,"detectedAdapter")||J.Str(legacyBalance,"revision")==previousRevision)throw J.Error("Legacy automatic balance queries must be disabled and cached balances invalidated.");
+        bool rejectedAuto=false;try{refreshStore.Upsert(J.Map("name","invalid automatic type","baseUrl","https://invalid-balance.example","key","fixture-invalid-balance","adapter","auto"));}catch{rejectedAuto=true;}
+        if(!rejectedAuto)throw J.Error("Saving an automatic balance adapter must be rejected.");
+        checks.Add("removed pause setting migration, default-off balance queries, explicit types and legacy auto migration");
         string fixtureFile=Path.Combine(Program.BaseDir,"usage-fixtures.json");if(!File.Exists(fixtureFile))throw J.Error("Run tests/generate-fixtures.cjs before testing.");
         var fixtures=J.Arr(J.Read(fixtureFile,null));foreach(var fixture in fixtures){string adapter=J.Str(fixture,"adapter"),period=J.Str(fixture,"period"),model=J.Str(fixture,"model");object actual=adapter=="newapi"?Usage.NewUsage(J.Get(fixture,"payload"),period,model,J.Num(fixture,"divisor")??500000):Usage.SubUsage(J.Get(fixture,"payload"),period,model);object expected=J.Get(fixture,"expected");if(Canonical(actual)!=Canonical(expected)){J.Atomic(Path.Combine(Program.BaseDir,"compatibility-diff.json"),J.Encode(J.Map("name",J.Str(fixture,"name"),"actual",actual,"expected",expected)));throw J.Error("Statistics parity: "+J.Str(fixture,"name"));}}
         checks.Add(fixtures.Count+" statistics parity fixtures");
@@ -31,8 +41,11 @@ internal static class CompatibilityTests {
         NetworkFailureChecks.Run(root,checks).GetAwaiter().GetResult();
         DraftChecks.Run(root,checks).GetAwaiter().GetResult();
         ProviderIdChecks.Run(root,checks);
+        ConfigChecks.Run(root,checks);
         UsageCacheChecks.Run(root,checks);
+        BalanceChecks.Run(root,checks).GetAwaiter().GetResult();
         ConnectionChecks.Run(checks).GetAwaiter().GetResult();
+        GenerationChecks.Run(checks).GetAwaiter().GetResult();
         ModelsChecks.Run(root,checks).GetAwaiter().GetResult();
         ModelCatalogChecks.Run(root,checks);
         CodexOnlyChecks.Run(root,checks).GetAwaiter().GetResult();
@@ -45,11 +58,11 @@ internal static class CompatibilityTests {
     }
     static byte[] Hex(string s){return Enumerable.Range(0,s.Length/2).Select(i=>Convert.ToByte(s.Substring(i*2,2),16)).ToArray();}
     static async Task NetworkChecks(string root,List<string> checks){
-        string config=Path.Combine(root,"fake-codex");Directory.CreateDirectory(config);var store=new Store(Path.Combine(root,"network-store"),config,new Secure());var p=store.Upsert(J.Map("name","auto fixture","baseUrl","https://arbitrary.example/v1","siteUrl","https://arbitrary.example","key","fixture-secret-key","adapter","auto"));string id=J.Str(p,"id");var paths=new List<string>();
+        string config=Path.Combine(root,"fake-codex");Directory.CreateDirectory(config);var store=new Store(Path.Combine(root,"network-store"),config,new Secure());var p=store.Upsert(J.Map("name","explicit fixture","baseUrl","https://arbitrary.example/v1","siteUrl","https://arbitrary.example","key","fixture-secret-key","adapter","sub2api"));string id=J.Str(p,"id");var paths=new List<string>();
         Usage.FetchOverride=(url,key,user)=>{paths.Add(new Uri(url).AbsolutePath);if(url.Contains("/api/log/token"))throw J.Error("fixture 404");return Task.FromResult<object>(J.Map("mode","unrestricted","balance",0,"model_stats",new object[0],"daily_usage",new object[0]));};
-        try {var result=await Usage.Inspect(store,id,"today");if(J.Has(result,"history")||J.Arr(store.Snapshots(id)).Count==0)throw J.Error("inspect excludes history while snapshots remain available");checks.Add("lean inspection responses preserve stored snapshots");if(J.Str(result,"adapter")!="sub2api"||J.Num(J.Get(result,"balance"),"value")!=0||J.Str(store.Details(id),"detectedAdapter")!="sub2api")throw J.Error("detection and zero balance");paths.Clear();await Usage.Inspect(store,id,"today");if(paths.Count!=1||paths[0]!="/v1/usage")throw J.Error("cached detection");checks.Add("automatic detection and cached routing");
+        try {var result=await Usage.Inspect(store,id,"today");if(J.Has(result,"history")||J.Arr(store.Snapshots(id)).Count==0)throw J.Error("inspect excludes history while snapshots remain available");checks.Add("lean inspection responses preserve stored snapshots");if(J.Str(result,"adapter")!="sub2api"||J.Num(J.Get(result,"balance"),"value")!=0)throw J.Error("explicit type and zero balance");paths.Clear();await Usage.Inspect(store,id,"today");if(paths.Count!=1||paths[0]!="/v1/usage")throw J.Error("explicit adapter routing");checks.Add("explicit adapter routing without detection");
             store.Upsert(J.Map("id",id,"name","new","baseUrl","https://new.example/v1","siteUrl","https://new.example","key","fixture-new-key","adapter","newapi"));Usage.FetchOverride=(url,key,user)=>Task.FromResult<object>(url.EndsWith("/api/log/token")?J.Map("success",true,"data",new[]{J.Map("type",2,"model_name","m","prompt_tokens",1000,"completion_tokens",30,"quota",100,"created_at",J.Unix(),"other",J.Map("cache_tokens",800))}):J.Map("success",true,"data",J.Map("quota_per_unit",250000,"user_quota",J.Map("total_available",500000))));result=await Usage.Inspect(store,id,"today");if(J.Num(J.Get(result,"balance"),"value")!=2||J.Num(J.Get(J.Get(result,"usage"),"totals"),"tokenRate")!=.8)throw J.Error("NewAPI balance and quota conversion");checks.Add("NewAPI account balance and quota conversion");
-            store.Upsert(J.Map("id",id,"name","unknown","baseUrl","https://unknown.example/v1","siteUrl","https://unknown.example","key","fixture-unknown-key","adapter","auto"));Usage.FetchOverride=(url,key,user)=>{throw J.Error("denied fixture-unknown-key");};result=await Usage.Inspect(store,id,"today");if(J.Get(result,"adapter")!=null||J.Encode(result).Contains("fixture-unknown-key"))throw J.Error("unknown backend must not be detected");checks.Add("failed authentication stays unknown and redacted");
+            store.Upsert(J.Map("id",id,"name","unknown","baseUrl","https://unknown.example/v1","siteUrl","https://unknown.example","key","fixture-unknown-key","adapter","sub2api"));Usage.FetchOverride=(url,key,user)=>{throw J.Error("denied fixture-unknown-key");};result=await Usage.Inspect(store,id,"today");if(J.Str(result,"adapter")!="sub2api"||J.Encode(result).Contains("fixture-unknown-key"))throw J.Error("failed request preserves the selected type");checks.Add("failed authentication keeps selected type and redacts credentials");
         }finally{Usage.FetchOverride=null;}
     }
 }

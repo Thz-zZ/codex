@@ -10,17 +10,19 @@
       const sameProvider=previous&&previous.id===result.id&&previous.revision===result.revision;
       const sameQuery=sameProvider&&previous.period===result.period&&(previous.model||'all')===(result.model||'all')&&previous.range?.start===result.range?.start&&previous.range?.end===result.range?.end;
       const retainedUsage=!result.usage&&sameQuery&&previous.usage;
+      const readLocal=result.localUsageRequested!==false,readBalance=result.balanceRequested!==false;
       const hasBalance=Number.isFinite(result.balance?.value),oldBalance=sameProvider&&Number.isFinite(previous.balance?.value)?previous:null;
       const summary=result.summary||result;
       const savedBalance=Number.isFinite(summary.balance?.value)&&(!oldBalance||Date.parse(summary.balanceAt||summary.at)>=Date.parse(oldBalance.balanceAt||oldBalance.at))?summary:oldBalance;
       return {...result,
         usage:result.usage||retainedUsage||null,
         usageAt:result.usage?(result.usageAt||result.at):retainedUsage?(previous.usageAt||previous.at):summary.usageAt,
-        usageStale:Boolean(retainedUsage||result.usageStale),
+        usageStale:Boolean(result.usageStale||retainedUsage&&(readLocal||previous.usageStale)),
         usageError:result.usageError||'',
-        balance:hasBalance?result.balance:savedBalance?.balance||result.balance,
+        localUsageError:result.localUsageError||(!readLocal&&sameQuery?previous.localUsageError||'':''),
+        balance:hasBalance?result.balance:savedBalance?.balance||result.balance||(!readBalance&&sameProvider?previous.balance:null),
         balanceAt:hasBalance?(result.balanceAt||result.at):savedBalance?.balanceAt||savedBalance?.at,
-        balanceError:result.balanceError||summary.balanceError||(!hasBalance?result.balance?.message||'接口未返回账户余额。':'')
+        balanceError:readBalance?(result.balanceError||summary.balanceError||(!hasBalance?result.balance?.message||'接口未返回账户余额。':'')):(sameProvider?previous.balanceError||'':'')
       };
     }
     constructor({maxEntries=24,maxBytes=4*1024*1024,maxEntryBytes=1024*1024}={}){

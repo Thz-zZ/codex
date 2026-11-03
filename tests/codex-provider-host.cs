@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 
 namespace RelayLite {
 internal static class CodexProviderTestHost {
@@ -16,6 +17,11 @@ internal static class CodexProviderTestHost {
                 if(args.Length>5){input["modelSelection"]="catalog";input["models"]=J.Decode(args[5]);}
                 if(args.Length>6)input["contextPreset"]=args[6];
                 input["modelFamily"]="codex";
+                if(args.Length>7&&args[7]=="official"){
+                    Func<object,string> segment=value=>Convert.ToBase64String(Encoding.UTF8.GetBytes(J.Encode(value))).TrimEnd('=').Replace('+','-').Replace('/','_');
+                    string jwt=segment(J.Map("alg","none","typ","JWT"))+"."+segment(J.Map("exp",J.Unix()+3600,"email","fixture@example.test","sub","fixture-user","https://api.openai.com/auth",J.Map("chatgpt_account_id","fixture-account","chatgpt_plan_type","plus","user_id","fixture-user")))+".fixture";
+                    J.Atomic(Path.Combine(config,"auth.json"),J.Encode(J.Map("auth_mode","chatgpt","tokens",J.Map("access_token",jwt,"id_token",jwt,"refresh_token","fake-official-refresh","account_id","fixture-account"),"last_refresh",J.Now())));
+                }
                 var provider=store.Upsert(input,true);
                 store.Switch(J.Str(provider,"id"));Console.WriteLine(J.Encode(store.ConfigInfo()));Console.Out.Flush();Console.ReadLine();
             }

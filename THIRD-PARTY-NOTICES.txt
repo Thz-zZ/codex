@@ -1,4 +1,4 @@
-Codex Relay — third-party notices
+Codex 中转台 — third-party notices
 
 This is an independent Codex-only desktop tool built on the earlier local cache dashboard.
 It references and adapts the NewAPI account-balance endpoint and quota conversion from

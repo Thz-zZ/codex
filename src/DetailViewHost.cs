@@ -7,10 +7,8 @@ internal sealed partial class MainForm {
     object HandleDetailViewState(object input){
         if(input!=null){
             var values=J.Obj(input);detailViewState.Clear();
-            foreach(string id in store.ProviderIds){
-                object value;
-                if(values.TryGetValue(id,out value))detailViewState[id]=value;
-            }
+            object value;
+            if(values.TryGetValue("local",out value))detailViewState["local"]=value;
         }
         return J.Clone(detailViewState);
     }

@@ -43,8 +43,24 @@ internal sealed partial class MainForm {
             if(restarted.Any(p=>!p.HasExited))throw J.Error("Restarted session service was not released.");
             J.Atomic(Path.Combine(qaDir,"memory-result.json"),J.Encode(J.Map("ok",true,"initialSessionProcesses",original.Count,"traySessionProcessesExited",true,"lazySessionRestart",true,"reuseDuringRelease",true,"cacheEntriesLimit",24,"cacheSerializedBytesLimit",4*1024*1024)));
         }finally{foreach(var process in original.Concat(restarted))process.Dispose();}
+        await CheckBackgroundLocalSmoke();
         await CheckSavedWindowSmoke();
         await CheckTrayWindowSmoke();
+    }
+    async Task CheckBackgroundLocalSmoke(){
+        await view.CoreWebView2.ExecuteScriptAsync("window.trayLocalSaved=window.relay;window.trayLocalCalls=0;window.trayBalanceCalls=0;window.relay={...window.relay,localUsage:input=>{window.trayLocalCalls++;return trayLocalSaved.localUsage(input);},inspect:input=>{window.trayBalanceCalls++;return trayLocalSaved.inspect(input);}};");
+        try{
+            await BackgroundLocalRefresh();
+            if(await view.CoreWebView2.ExecuteScriptAsync("trayLocalCalls===0")!="true")throw J.Error("Native local timer duplicated a visible-window refresh.");
+            HideToTray();await BackgroundLocalRefresh();
+            bool completed=false;
+            for(int n=0;n<200;n++){if(await view.CoreWebView2.ExecuteScriptAsync("trayLocalCalls===1&&trayBalanceCalls===0&&!pending.size&&Boolean(currentDetail?.usage)")=="true"){completed=true;break;}await Task.Delay(50);}
+            if(!completed)throw J.Error("Tray local refresh did not finish independently of balance.");
+            J.Atomic(Path.Combine(qaDir,"tray-local-result.json"),J.Encode(J.Map("ok",true,"localOnly",true,"visibleWindowSkipped",true)));
+        }finally{
+            await view.CoreWebView2.ExecuteScriptAsync("window.relay=trayLocalSaved;");
+            ReleaseIdleSessionBridge();await sessionRelease;await Open();
+        }
     }
 }
 }

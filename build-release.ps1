@@ -49,19 +49,21 @@ Copy-Item -LiteralPath (Join-Path $relayRoot 'CHANGELOG.md') -Destination (Join-
 $relayEncoding=[Text.UTF8Encoding]::new($false)
 [IO.File]::WriteAllText((Join-Path $relayRelease 'VERSION.txt'),($relayVersion+"`r`n"),$relayEncoding)
 $relayGuide=@"
-Codex Relay Lite v$relayVersion
+Codex 中转台 v$relayVersion
 
 双击“Codex Relay Lite.exe”启动，也可使用桌面快捷方式。
 请保留同目录的 SessionBackend.exe、ui 文件夹及 DLL 文件，移动应用时请移动整个文件夹。
 
 支持 Windows x64，使用 .NET Framework 4.8 和 Microsoft Edge WebView2 Runtime。
-中转与加密密钥沿用本机 Codex Relay Lite 数据目录。
+中转与加密密钥沿用原有本机数据目录。
 本应用仅支持 Codex Responses 直连，无需本地模型桥接，退出本应用不影响 Codex 调用。
 添加中转请点击左上角品牌栏右侧的“＋”图标。
-默认模型须明确选择；默认推理强度可选，不指定时跟随 Codex，指定后仍可在 Codex 内切换支持的档位。
-6.1 Sol 可在 Relay 的模型下拉框选择“6.1 Sol · 500k”预设；普通项保留原预算，仅选用预设时使用 500k，请确认中转支持后选用。保存并应用后需重启 Codex。
+右键左侧中转卡片可编辑、应用到 Codex 或删除；使用中的中转显示浅色卡片样式，点击查看不增加高亮。
+获取模型可选：未获取时使用 Codex 内置模型列表和默认模型；获取后需从返回列表选择默认模型，也可点击“使用内置默认”恢复。
+默认推理强度可选，不指定时跟随 Codex，指定后仍可在 Codex 内切换支持的档位。模型列表不额外添加容量预设，保存并应用后需重启 Codex。
 启动时安全升级本应用的旧模型目录并保存加密备份；上下文预算不代表上游容量，用量以真实 Token 通知为准。
-关闭窗口会收起到托盘，后台继续刷新当前中转的用量统计；重开保留原页面、筛选和未保存草稿，不重新加载。
+余额每 5 分钟静默刷新使用中中转，也可点击左侧刷新图标；全局本地记录每 1 分钟静默刷新，右侧“同步”只读取本地记录。切换中转保留本地统计和筛选。
+关闭窗口会收起到托盘，后台继续按各自周期同步；重开保留原页面、筛选和未保存草稿，不重新加载。
 自动记住窗口大小、位置和最大化状态，完全退出后再次启动也会恢复；最小化或静默启动不会覆盖正常窗口尺寸。
 完全退出请右键托盘图标选择“退出”。
 “设置 → 软件更新”可检查、下载并重启安装新版，默认在启动时及每 6 小时检查。
@@ -72,7 +74,7 @@ Codex Relay Lite v$relayVersion
 版本号见 VERSION.txt，更新内容见“版本记录.md”。
 "@
 [IO.File]::WriteAllText((Join-Path $relayRelease '使用说明.txt'),$relayGuide,$relayEncoding)
-$relayManifest=[ordered]@{name='Codex Relay Lite';version=$relayVersion;fileVersion=($relayVersion+'.0');platform='windows-x64';builtAtUtc=[DateTime]::UtcNow.ToString('o')}
+$relayManifest=[ordered]@{name='Codex 中转台';version=$relayVersion;fileVersion=($relayVersion+'.0');platform='windows-x64';builtAtUtc=[DateTime]::UtcNow.ToString('o')}
 [IO.File]::WriteAllText((Join-Path $relayRelease 'build-info.json'),($relayManifest | ConvertTo-Json),$relayEncoding)
 $relayPackageFiles=@(Get-ChildItem -LiteralPath $relayRelease -Recurse -File | ForEach-Object {$_.FullName.Substring($relayRelease.TrimEnd('\').Length+1).Replace('\','/')} | Sort-Object)+@('package-files.json')
 [IO.File]::WriteAllText((Join-Path $relayRelease 'package-files.json'),(@{files=$relayPackageFiles} | ConvertTo-Json -Depth 5),$relayEncoding)

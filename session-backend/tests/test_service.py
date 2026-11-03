@@ -31,6 +31,14 @@ def test_missing_home_settings_can_be_repaired(tmp_path):
     assert not s.home.exists()
 
 
+def test_local_usage_does_not_require_a_codex_rpc(home):
+    s = service(home)
+    s.rpc = None
+    result = s.dispatch('usage', {'period': 'today'})
+    assert result['mode'] == 'local'
+    assert result['totals']['records'] == 0
+
+
 def test_inventory_preview_and_bound_pagination(home):
     first = add_session(home, '分页中文 <script> 标签', count=130)
     second = add_session(home, '归档记录', archived=True)

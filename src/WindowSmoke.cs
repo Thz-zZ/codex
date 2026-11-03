@@ -38,7 +38,7 @@ internal sealed partial class MainForm {
         EventHandler<CoreWebView2NavigationStartingEventArgs> navigationHandler=(sender,args)=>navigationCount++;
         originalCore.NavigationStarting+=navigationHandler;
         const string snapshot="JSON.stringify({page,scroll:document.querySelector('main').scrollTop,dialog:$('providerDialog').open,name:$('providerName').value,url:$('baseUrl').value,dialogScroll:document.querySelector('#providerDialog .dialog-body').scrollTop})";
-        await originalCore.ExecuteScriptAsync("window.trayKeepAliveDocument=document;window.trayKeepAliveNode=$('settingsPage');window.traySavedApi=window.relay;window.trayHiddenAutoFetches=0;window.relay={...window.relay,inspect:input=>{window.trayHiddenAutoFetches++;return traySavedApi.inspect(input);}};");
+        await originalCore.ExecuteScriptAsync("window.trayKeepAliveDocument=document;window.trayKeepAliveNode=$('settingsPage');window.traySavedApi=window.relay;window.trayHiddenAutoFetches=0;window.relay={...window.relay,inspect:input=>{window.trayHiddenAutoFetches++;return traySavedApi.inspect(input);},localUsage:input=>{window.trayHiddenAutoFetches++;return traySavedApi.localUsage(input);}};");
         try{
             for(int cycle=0;cycle<3;cycle++){
                 await originalCore.ExecuteScriptAsync(cycle==0?"navigate('settings');document.querySelector('main').scrollTop=80;":cycle==1?"openEditor();$('providerName').value='未保存的托盘草稿';$('baseUrl').value='https://tray-fixture.example/v1';document.querySelector('#providerDialog .dialog-body').scrollTop=60;":"closeEditor();navigate('details');document.querySelector('main').scrollTop=120;");
@@ -46,13 +46,18 @@ internal sealed partial class MainForm {
                 string before=await originalCore.ExecuteScriptAsync(snapshot);
                 Close();
                 await Task.Delay(100);
-                if(Visible||ShowInTaskbar||quitting||!ReferenceEquals(view,originalView)||!ReferenceEquals(view.CoreWebView2,originalCore))throw J.Error("Closing the window did not retain the background application and WebView.");
-                string hidden=await originalCore.ExecuteScriptAsync("(()=>{if(!document.hidden)return false;window.trayHiddenAutoFetches=0;nextRefresh=Date.now()-100;updateCountdown();nextRefresh=Date.now()+60000;return trayHiddenAutoFetches===0;})()");
+                if(Visible||ShowInTaskbar||quitting||!ReferenceEquals(view,originalView)||!ReferenceEquals(view.CoreWebView2,originalCore))throw J.Error("Closing the window did not retain the background application and WebView: "+J.Encode(J.Map("cycle",cycle,"visible",Visible,"taskbar",ShowInTaskbar,"quitting",quitting,"sameView",ReferenceEquals(view,originalView),"sameCore",ReferenceEquals(view.CoreWebView2,originalCore))));
+                string hidden=await originalCore.ExecuteScriptAsync("(()=>{if(!document.hidden)return false;window.trayHiddenAutoFetches=0;runScheduledRefresh();runScheduledLocalRefresh();return trayHiddenAutoFetches===0;})()");
                 if(hidden!="true")throw J.Error("Hidden WebView duplicated automatic refresh or remained visible.");
                 if(cycle==0){
-                    var originalFetch=Usage.FetchOverride;
-                    try{Usage.FetchOverride=(url,key,user)=>{backgroundFetches++;return originalFetch(url,key,user);};await BackgroundRefresh();}
-                    finally{Usage.FetchOverride=originalFetch;}
+                    var originalFetch=Usage.FetchOverride;string cacheFile=Path.Combine(store.Dir,"usage-cache.json"),savedCache=File.ReadAllText(cacheFile);
+                    try{
+                        Usage.FetchOverride=(url,key,user)=>{backgroundFetches++;return originalFetch(url,key,user);};await BackgroundRefresh();
+                        if(backgroundFetches!=0)throw J.Error("Tray queried a recently refreshed balance again.");
+                        var cached=J.Arr(J.Decode(savedCache));foreach(var entry in cached)J.Obj(entry)["balanceAt"]=DateTimeOffset.UtcNow.AddMilliseconds(-BalanceRefreshInterval-1000).ToString("o");
+                        J.Atomic(cacheFile,J.Encode(cached));await BackgroundRefresh();
+                    }
+                    finally{Usage.FetchOverride=originalFetch;J.Atomic(cacheFile,savedCache);}
                     if(backgroundFetches==0)throw J.Error("Native tray refresh stopped after closing the window.");
                 }
                 await Open();
@@ -64,7 +69,7 @@ internal sealed partial class MainForm {
             J.Atomic(Path.Combine(qaDir,"window-lifecycle-result.json"),J.Encode(J.Map("ok",true,"closeReopenCycles",3,"sameWebView",true,"documentNavigations",navigationCount,"settingsAndScrollPreserved",true,"unsavedEditorPreserved",true,"backgroundRefreshContinues",backgroundFetches>0,"hiddenUiRefreshSuppressed",true,"bridgeRetained",true)));
         }finally{
             originalCore.NavigationStarting-=navigationHandler;
-            await originalCore.ExecuteScriptAsync("window.relay=traySavedApi;closeEditor();navigate('providers');nextRefresh=Date.now()+60000;delete window.trayKeepAliveDocument;delete window.trayKeepAliveNode;delete window.traySavedApi;delete window.trayHiddenAutoFetches;");
+            await originalCore.ExecuteScriptAsync("window.relay=traySavedApi;closeEditor();navigate('providers');resetBalanceRefreshTimer();resetLocalRefreshTimer();delete window.trayKeepAliveDocument;delete window.trayKeepAliveNode;delete window.traySavedApi;delete window.trayHiddenAutoFetches;");
         }
     }
 }

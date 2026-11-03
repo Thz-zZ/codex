@@ -4,20 +4,27 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const http=require('node:http');
-const {spawn}=require('node:child_process');
+const {spawn,spawnSync}=require('node:child_process');
 const {once}=require('node:events');
-const hostPath=path.resolve(process.argv[2]||'build/codex-provider-tests/CodexProviderTestHost.exe');
+const hostPath=path.resolve(process.argv[2]||'build/current/CodexProviderTestHost.exe');
 const codexPath=process.argv[3]||'codex';
+const nativeResult=spawnSync(codexPath,['debug','models','--bundled'],{windowsHide:true,encoding:'utf8',maxBuffer:16*1024*1024});
+const nativeModels=nativeResult.status===0?JSON.parse(nativeResult.stdout).models:[];
+let fixtureIndex=0;
+function stopTestProcess(child){if(!child||child.exitCode!==null)return;if(process.platform==='win32')spawnSync('taskkill.exe',['/pid',String(child.pid),'/t','/f'],{windowsHide:true,stdio:'ignore'});else child.kill();}
 
-async function check(effort,requestEffort,withUsage=true,contextOverride,contextPreset='default',model='relay-context-fixture'){
+async function check(effort,requestEffort,withUsage=true,contextOverride,contextPreset='default',model='relay-context-fixture',apiPrefix='/v1',officialLogin=false){
   const protocol='responses';
-  const directory=path.resolve('build/model-context/'+protocol+'-'+effort+'-'+Date.now());
+  const directory=path.resolve('build/current/provider-test-work/model-context/case-'+fixtureIndex++);
+  const native=nativeModels.find(value=>value.slug===model);
   const workspace=path.join(directory,'workspace');fs.mkdirSync(workspace,{recursive:true});
   let host,app,hostExit,fixtureError,requests=0;
   const upstream=http.createServer(async(request,response)=>{
     try{
       let body='';for await(const chunk of request)body+=chunk;
-      const input=JSON.parse(body),expectedEffort=requestEffort||(effort==='default'?undefined:effort);requests++;fs.writeFileSync(path.join(directory,'upstream-request.json'),JSON.stringify(input,null,2));
+      assert.equal(request.url,apiPrefix+'/responses','native Codex uses the exact API prefix saved by the application');
+      assert.equal(request.headers.authorization,'Bearer fake-codex-cli-secret','generation always uses the selected relay API key');
+      const input=JSON.parse(body),expectedEffort=requestEffort||(effort==='default'?native?.default_reasoning_level:effort);requests++;fs.writeFileSync(path.join(directory,'upstream-request.json'),JSON.stringify(input,null,2));
       assert.equal(input.model,model,'a display preset never changes the upstream model ID');
       response.writeHead(200,{'Content-Type':'text/event-stream'});
       {
@@ -33,7 +40,7 @@ async function check(effort,requestEffort,withUsage=true,contextOverride,context
   });
   try{
     upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
-    host=spawn(hostPath,[directory,'http://127.0.0.1:'+upstream.address().port+'/v1',model,protocol,effort,JSON.stringify([model,'other-model']),contextPreset],{windowsHide:true,stdio:['pipe','pipe','pipe']});hostExit=once(host,'exit');
+    host=spawn(hostPath,[directory,'http://127.0.0.1:'+upstream.address().port+apiPrefix,model,protocol,effort,JSON.stringify([model,'other-model']),contextPreset,...(officialLogin?['official']:[])],{windowsHide:true,stdio:['pipe','pipe','pipe']});hostExit=once(host,'exit');
     let hostError='';host.stderr.on('data',chunk=>hostError+=chunk);
     await Promise.race([once(host.stdout,'data'),hostExit.then(([code])=>{throw Error('Fixture failed '+code+': '+hostError);})]);
     if(contextOverride){const file=path.join(directory,'config/config.toml');fs.writeFileSync(file,'model_context_window = '+contextOverride+'\n'+fs.readFileSync(file,'utf8'));}
@@ -65,12 +72,13 @@ async function check(effort,requestEffort,withUsage=true,contextOverride,context
     if(fixtureError)throw fixtureError;
     assert.ok(requests>0,'native Codex completed a real fixture request');
     if(withUsage){
-      assert.equal(usage?.modelContextWindow,(contextOverride||(contextPreset==='sol-500k'?500000:272000))*(contextPreset==='sol-500k'?1:0.95),'context notification respects the selected preset and explicit overrides');
+      const capacity=contextOverride||native?.context_window,percent=native?.effective_context_window_percent||95;
+      assert.equal(usage?.modelContextWindow??null,capacity?capacity*percent/100:null,'context notifications retain native budgets or explicit overrides without synthesizing a capacity for unknown aliases');
       assert.equal(usage.last.totalTokens,60,'context indicator uses real upstream usage, not a fabricated counter');
     }else assert.ok(!usage||usage.last.totalTokens===0,'missing upstream usage is not replaced with an invented positive count');
-    console.log(JSON.stringify({ok:true,protocol,effort,requestEffort,withUsage,contextOverride,contextPreset,model,contextWindow:usage?.modelContextWindow,usedTokens:usage?.last.totalTokens,fixture:directory}));
+    console.log(JSON.stringify({ok:true,protocol,effort,requestEffort,withUsage,contextOverride,contextPreset,model,apiPrefix,officialLogin,contextWindow:usage?.modelContextWindow,usedTokens:usage?.last.totalTokens,fixture:directory}));
   }finally{
-    if(app&&app.exitCode===null)app.kill();
+    stopTestProcess(app);
     if(host&&host.exitCode===null){host.stdin.end('\n');await hostExit;}
     upstream.close();upstream.closeAllConnections();
   }
@@ -79,4 +87,7 @@ async function check(effort,requestEffort,withUsage=true,contextOverride,context
   await check('default');await check('high');await check('high','low');await check('default',undefined,true,200000);await check('default',undefined,false);
   await check('high',undefined,true,undefined,'sol-500k','gpt-6.1-sol');
   await check('default',undefined,true,undefined,'default','gpt-6.1-sol');
+  await check('default',undefined,true,undefined,'default','relay-context-fixture','/custom/v2');
+  await check('default',undefined,true,undefined,'default','relay-context-fixture','');
+  await check('default',undefined,true,undefined,'default','relay-context-fixture','/v1',true);
 })().catch(error=>{console.error(error);process.exitCode=1;});

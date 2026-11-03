@@ -43,7 +43,7 @@ internal static class Usage {
         }
         return true;
     }
-    static string Root(object p) { return J.Str(p,"siteUrl",J.Str(p,"baseUrl")).TrimEnd('/'); }
+    static string Root(object p) { return Store.SiteRoot(J.Str(p,"siteUrl",J.Str(p,"baseUrl"))); }
     internal static object Unwrap(object value) { var data=J.Get(value,"data");return data is Dictionary<string,object>?data:value; }
     static string Day(DateTime now) { return now.ToUniversalTime().AddHours(8).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture); }
     internal static object Range(string period,DateTime? now=null) {
@@ -112,7 +112,7 @@ internal static class Usage {
         if(key=="")return J.Map("adapter",null,"message","请先填写 API 调用密钥。");
         if(key.Length>4096||account.Length>16384||(key+account).IndexOfAny(new[]{'\r','\n'})>=0)throw J.Error("密钥格式无效。");
         string baseUrl=Store.BaseUrl(J.Str(input,"baseUrl")),site=J.Str(input,"siteUrl").Trim();
-        var p=J.Map("baseUrl",baseUrl,"siteUrl",site==""?baseUrl:Store.BaseUrl(site),"accountUserId",J.Str(input,"accountUserId"),"quotaPerUnit",J.N(J.Get(input,"quotaPerUnit"))??500000);
+        var p=J.Map("baseUrl",baseUrl,"siteUrl",Store.SiteRoot(site==""?baseUrl:site),"accountUserId",J.Str(input,"accountUserId"),"quotaPerUnit",J.N(J.Get(input,"quotaPerUnit"))??500000);
         var range=Range("today");var errors=new List<string>();string choice=J.Str(input,"adapter","auto"),detected=null;object payload=null;bool stopped=false;
         if(!new[]{"auto","newapi","sub2api"}.Contains(choice))throw J.Error("请选择有效的接口类型。");
         foreach(string type in choice=="auto"?new[]{"newapi","sub2api"}:new[]{choice}){
@@ -203,8 +203,8 @@ internal static class Usage {
     static async Task<object> AccountBalance(object p,string adapter,string key,string account,object usage) {
         string root=Root(p);
         if(adapter=="sub2api") {
-            var value=J.Num(Unwrap(usage),"balance");if(value.HasValue)return J.Map("value",value,"unit","USD","label","账户余额","source","/v1/usage · balance");
-            if(account!=""){var user=Unwrap(await Get(root+"/api/v1/auth/me",account));value=J.Num(user,"balance");if(value.HasValue)return J.Map("value",value,"unit","USD","label","账户余额","source","/api/v1/auth/me · balance");}
+            if(account!="")try{var user=Unwrap(await Get(root+"/api/v1/auth/me",account));var value=J.Num(user,"balance");if(value.HasValue)return J.Map("value",value,"unit","USD","label","账户余额","source","/api/v1/auth/me · balance");}catch{}
+            var usageBalance=J.Num(Unwrap(usage),"balance");if(usageBalance.HasValue)return J.Map("value",usageBalance,"unit","USD","label","账户余额","source","/v1/usage · balance");
             return J.Map("value",null,"label","账户余额","message","接口未提供账户余额，可在编辑中填写账户访问令牌。");
         }
         double? quota;string source;
@@ -212,13 +212,39 @@ internal static class Usage {
             string userId=J.Str(p,"accountUserId");if(!Regex.IsMatch(userId,@"^\d+$"))return J.Map("value",null,"label","账户余额","message","请在编辑中填写 NewAPI 用户 ID。");
             quota=J.Num(Unwrap(await Get(root+"/api/user/self",account,userId)),"quota");source="/api/user/self · quota";
         } else {
-            var data=Unwrap(await Get(root+"/api/usage/token",key));quota=J.Num(J.Get(data,"user_quota"),"total_available");source="/api/usage/token · user_quota";
+            var data=IsNewToken(usage)?Unwrap(usage):Unwrap(await Get(root+"/api/usage/token",key));quota=J.Num(J.Get(data,"user_quota"),"total_available");source="/api/usage/token · user_quota";
             if(!quota.HasValue)return J.Map("value",null,"label","账户余额","message","该密钥未开放账户额度；请在编辑中填写账户访问令牌和用户 ID。");
         }
         if(!quota.HasValue)return J.Map("value",null,"label","账户余额","message","接口没有返回账户余额字段。");
         double divisor=J.Num(p,"quotaPerUnit")??500000;string conversion="按设置换算";
-        try {var status=Unwrap(await Get(root+"/api/status",""));var unit=J.Num(status,"quota_per_unit");if(unit>0){divisor=unit.Value;conversion="按站点换算";}}catch{}
+        var unit=await QuotaUnit(root);if(unit>0){divisor=unit.Value;conversion="按站点换算";}
         return J.Map("value",quota/divisor,"unit","USD","label","账户余额","source",source+" · "+conversion+" 1 USD = "+divisor.ToString(CultureInfo.InvariantCulture)+" 额度","rawQuota",quota,"divisor",divisor);
+    }
+    static readonly Dictionary<string,Tuple<DateTime,double?>> QuotaUnits=new Dictionary<string,Tuple<DateTime,double?>>();
+    static async Task<double?> QuotaUnit(string root){
+        Tuple<DateTime,double?> cached;if(QuotaUnits.TryGetValue(root,out cached)&&cached.Item1>DateTime.UtcNow)return cached.Item2;
+        double? unit=null;try{unit=J.Num(Unwrap(await Get(root+"/api/status","")),"quota_per_unit");}catch{}
+        if(QuotaUnits.Count>=128)QuotaUnits.Clear();QuotaUnits[root]=Tuple.Create(DateTime.UtcNow.AddMinutes(unit>0?60:5),unit);return unit;
+    }
+    static async Task<object> ReadBalance(object p,string adapter,string key,string account,object range,object token=null){
+        if(adapter=="newapi")return await AccountBalance(p,adapter,key,account,token);
+        if(account!=""){
+            try{var user=Unwrap(await Get(Root(p)+"/api/v1/auth/me",account));var value=J.Num(user,"balance");if(value.HasValue)return J.Map("value",value,"unit","USD","label","账户余额","source","/api/v1/auth/me · balance");}
+            catch(Exception ex){if(TransportFailure(ex))throw;}
+        }
+        var payload=await Get(Endpoint(p,"sub2api",range),key);if(!IsSub(payload))throw J.Error("返回的数据不是 Sub2API 余额格式。");
+        return await AccountBalance(p,"sub2api",key,"",payload);
+    }
+    public static async Task<object> InspectBalance(Store store,string id,string period,string model="all") {
+        var range=Range(period);var p=store.Details(id);string key=J.Str(p,"key"),account=J.Str(p,"accountKey"),choice=J.Str(p,"adapter","none");
+        string detected=choice,error="";object balance;
+        if(choice!="newapi"&&choice!="sub2api"){detected="none";balance=J.Map("value",null,"label","账户余额","message","未启用余额查询；模型调用可正常使用。");}
+        else try{balance=await ReadBalance(p,choice,key,account,Range("today"));}
+        catch(Exception ex){balance=J.Map("value",null,"label","账户余额","message",ErrorText(ex,key,account));}
+        store.RequireRevision(id,J.Str(p,"revision"));string at=J.Now();error=Sanitize(J.Str(balance,"message"),key,account);
+        store.Record(id,J.Map("at",at,"period",period,"model",model,"adapter",detected==""?null:detected,"balance",balance,"error",error));
+        var inspection=J.Map("id",id,"at",at,"period",period,"model",model,"range",range,"revision",J.Str(p,"revision"),"adapter",detected,"usage",null,"usageError","","balance",balance,"balanceError",error,"balanceRequested",true,"localUsageRequested",false);
+        inspection["summary"]=UsageCache.PutBalance(store,inspection);return inspection;
     }
     public static async Task<object> Inspect(Store store,string id,string period,string model="all") {
         var range=Range(period);var p=store.Details(id);string key=J.Str(p,"key"),account=J.Str(p,"accountKey"),choice=J.Str(p,"adapter","auto"),preferred=J.Str(p,"detectedAdapter","newapi");

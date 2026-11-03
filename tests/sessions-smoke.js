@@ -9,9 +9,9 @@
   check($('periodPicker').getBoundingClientRect().left-toolbar.left<25,'date filter aligned left');
   const active=state.providers.find(p=>p.active).id,other=state.providers.find(p=>!p.active).id;
   await openDetails(other);
-  check(document.querySelector('.provider-card.is-viewing').dataset.id===other,'viewing outline follows chosen provider');
+  check(detailId===other&&!document.querySelector('.provider-card.is-viewing'),'viewing a provider adds no selection style');
   check(document.querySelector('.provider-card.active').dataset.id===active,'applied provider unchanged');
-  check(getComputedStyle(document.querySelector('.provider-card.is-viewing')).borderTopColor!==getComputedStyle(document.querySelector('.provider-card.active')).borderTopColor,'viewing and applied borders distinct');
+  check(getComputedStyle(document.querySelector('.provider-card.active')).borderTopColor==='rgb(205, 215, 228)','applied provider uses the subtle card border');
   navigate('sessions');
   await waitFor(()=>ready()&&document.querySelectorAll('.session-row').length===4,'native inventory loaded');
   check($('sessionCounts').textContent.includes('4'),'counts render');
@@ -59,5 +59,5 @@
   $('sessionSettingsDialog').close();
   $('sessionSearch').value='界面布局';$('sessionSearch').dispatchEvent(new Event('input'));document.querySelector('.session-open').click();
   await waitFor(()=>document.querySelector('.session-message.tool'),'restore session preview');
-  window.sessionSmokeResult={ok:true,inventory:4,previewPagination:true,tools:true,deleteScope:true,readOnly:true,viewingBorder:true,metrics:4};
+  window.sessionSmokeResult={ok:true,inventory:4,previewPagination:true,tools:true,deleteScope:true,readOnly:true,noViewingStyle:true,appliedCardStyle:true,metrics:4};
 })().catch(error=>window.sessionSmokeResult={ok:false,error:error.message,stack:error.stack});

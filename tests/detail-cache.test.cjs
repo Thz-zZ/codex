@@ -25,6 +25,27 @@ test('a successful retry replaces retained usage and clears failure state',()=>{
   assert.equal(merged.usageStale,false);assert.equal(merged.usageError,'');assert.equal(merged.balanceError,'');
 });
 
+test('balance refresh preserves local data time without marking it failed',()=>{
+  const original={...successful(),localUsageRequested:true};
+  const update={...original,at:'2026-10-17T01:04:00Z',usage:null,localUsageRequested:false,balance:{value:3}};
+  const merged=DetailCache.merge(original,update);
+  assert.equal(merged.usage,original.usage);
+  assert.equal(merged.usageAt,original.at);
+  assert.equal(merged.usageStale,false);
+  assert.equal(merged.balance.value,3);
+  assert.equal(merged.balanceAt,update.at);
+});
+
+test('local date and model queries retain the relay balance without inventing a remote failure',()=>{
+  const original={...successful(),balanceError:'previous balance failure'};
+  const local={...original,period:'7',balance:undefined,balanceError:undefined,balanceRequested:false,usage:{mode:'local',totals:{input:2}}};
+  const merged=DetailCache.merge(original,local);
+  assert.equal(merged.usage,local.usage);
+  assert.equal(merged.balance.value,0);
+  assert.equal(merged.balanceAt,original.at);
+  assert.equal(merged.balanceError,original.balanceError);
+});
+
 test('a recent known balance from the backend summary takes precedence over an older chart balance',()=>{
   const original=successful(),balance={value:2},balanceAt='2026-10-17T01:02:00Z';
   const merged=DetailCache.merge(original,{...original,at:'2026-10-17T01:03:00Z',usage:null,usageError:'offline',balance:{value:null,message:'offline'},summary:{balance,balanceAt}});

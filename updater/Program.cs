@@ -11,7 +11,7 @@ internal static class UpdaterProgram {
         if(args.Length!=2||args[0]!="--apply")return 2;
         using(var updating=new Mutex(false,"Local\\CodexRelayLiteUpdating")){
             bool owned=false;try{try{owned=updating.WaitOne(0);}catch(AbandonedMutexException){owned=true;}if(!owned)throw J.Error("另一个更新任务正在运行。");Apply(Path.GetFullPath(args[1]));return 0;}
-            catch(Exception ex){MessageBox.Show(ex.Message,"Codex Relay Lite 更新失败",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+            catch(Exception ex){MessageBox.Show(ex.Message,"Codex 中转台 更新失败",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
             finally{if(owned)updating.ReleaseMutex();}
         }
     }

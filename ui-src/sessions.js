@@ -147,7 +147,7 @@ window.RelaySessions=(()=>{
   $('sessionBrowseExe').onclick=async()=>{const value=await run('请选择 codex.exe…',()=>api('browseCodex'));if(value)$('sessionExeInput').value=value;};
   $('sessionSettingsForm').onsubmit=async event=>{
     event.preventDefault();$('sessionSaveSettings').disabled=true;$('sessionSettingsError').textContent='';
-    try{config=await api('configure',{home:$('sessionHomeInput').value.trim(),executable:$('sessionExeInput').value.trim(),readOnly:$('sessionReadOnly').checked});$('sessionSettingsDialog').close();loaded=false;await refresh();}
+    try{config=await api('configure',{home:$('sessionHomeInput').value.trim(),executable:$('sessionExeInput').value.trim(),readOnly:$('sessionReadOnly').checked});setState(await call('state'));$('sessionSettingsDialog').close();loaded=false;await refresh();}
     catch(error){$('sessionSettingsError').textContent=error.message;}finally{$('sessionSaveSettings').disabled=false;}
   };
   $('sessionPlanAck').onchange=()=>$('sessionPlanConfirm').disabled=!$('sessionPlanAck').checked;

@@ -28,5 +28,13 @@ internal static class UsageCache {
             "totals",usage!=null?J.Get(usage,"totals"):J.Get(previous,"totals"),"usageAt",usage!=null?J.Get(query,"at"):J.Get(previous,"usageAt"),"usageError",J.Str(query,"usageError"),"costNote",usage!=null?J.Str(usage,"costNote"):J.Str(previous,"costNote"));
         values.RemoveAll(x=>J.Str(x,"id")==id);values.Add(value);J.Atomic(FileName(store),J.Encode(values));return value;
     }
+    internal static object PutBalance(Store store,object query){
+        var values=Load(store);string id=J.Str(query,"id");var previous=values.FirstOrDefault(x=>J.Str(x,"id")==id);
+        var balance=J.Get(query,"balance");bool hasBalance=J.Num(balance,"value").HasValue;
+        var value=J.Map("id",id,"revision",J.Str(query,"revision"),"period","today","model","all","range",Usage.Range("today"),"at",J.Str(query,"at"),"checkedAt",J.Str(query,"at"),"adapter",J.Get(query,"adapter"),"balanceRequested",true,"localUsageRequested",false,
+            "balance",hasBalance?balance:J.Get(previous,"balance",balance),"balanceAt",hasBalance?J.Str(query,"at"):J.Get(previous,"balanceAt"),"balanceError",J.Str(query,"balanceError",J.Str(balance,"message")),
+            "totals",null,"usageAt",null,"usageError","","costNote","");
+        values.RemoveAll(x=>J.Str(x,"id")==id);values.Add(value);J.Atomic(FileName(store),J.Encode(values));return value;
+    }
 }
 }
