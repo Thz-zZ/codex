@@ -14,7 +14,7 @@
 
 ## 版本与应用打包
 
-当前版本为 **v1.2.9**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
+当前版本为 **v1.2.10**，更新内容见 `CHANGELOG.md`。版本定义位于 `src/AppVersion.cs`，构建时自动同步到应用界面和 EXE 文件属性。
 
 运行 `build-release.ps1` 生成可直接运行的 Windows x64 应用文件夹。程序固定放在 `release/current/`，ZIP 和 `update.json` 固定放在 `release/assets/`，本地只保留当前一套。重复打包会替换这两个目录中的上一份产物，旧目录送入回收站，不累积版本文件夹或旧 ZIP。发布包包含应用与会话服务 EXE、DLL、界面、许可、会话管理说明及版本记录。
 
